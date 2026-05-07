@@ -302,6 +302,9 @@ func _create_spin_box(min_value: float, max_value: float, step: float, value: fl
 
 
 func _create_file_dialogs() -> void:
+	if not Engine.is_editor_hint():
+		return
+
 	_source_file_dialog = _create_file_dialog("Select 3D Asset", _on_source_file_selected)
 	_source_file_dialog.add_filter("*.tscn, *.scn, *.glb, *.gltf, *.obj, *.fbx, *.blend ; Supported 3D assets")
 	_source_file_dialog.add_filter("*.tscn, *.scn ; Godot scenes")
@@ -364,7 +367,8 @@ func _build_preview_scene() -> void:
 
 
 func _on_browse_pressed() -> void:
-	_source_file_dialog.popup_centered_ratio(0.75)
+	if _source_file_dialog:
+		_source_file_dialog.popup_centered_ratio(0.75)
 
 
 func _on_source_file_selected(path: String) -> void:
@@ -373,11 +377,13 @@ func _on_source_file_selected(path: String) -> void:
 
 
 func _on_material_browse_pressed() -> void:
-	_material_file_dialog.popup_centered_ratio(0.75)
+	if _material_file_dialog:
+		_material_file_dialog.popup_centered_ratio(0.75)
 
 
 func _on_texture_browse_pressed() -> void:
-	_texture_file_dialog.popup_centered_ratio(0.75)
+	if _texture_file_dialog:
+		_texture_file_dialog.popup_centered_ratio(0.75)
 
 
 func _on_material_file_selected(path: String) -> void:

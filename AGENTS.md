@@ -7,6 +7,7 @@ This is a Godot 4.6 project focused on an editor addon. The active addon lives i
 - `addons/blender_sprite_sheet/plugin.cfg` declares the addon metadata and entry script.
 - `addons/blender_sprite_sheet/blender_sprite_sheet.gd` contains the `EditorPlugin` implementation.
 - `addons/blender_sprite_sheet/*.uid` files are Godot-generated resource IDs; keep them with their matching resource.
+- `tests/` contains gdUnit4 test suites for addon behavior.
 - `project.godot` enables the plugin for local development, but it is currently ignored by Git.
 
 Add new addon code beside the existing plugin script unless it is shared across multiple plugins. Use clear feature-oriented names such as `sprite_sheet_importer.gd`.
@@ -24,6 +25,14 @@ Run a headless project check before submitting changes:
 ```sh
 godot --headless --editor --quit
 ```
+
+Run the automated gdUnit4 suite in quiet headless mode:
+
+```sh
+godot --headless --quiet --path . -s -d res://addons/gdUnit4/bin/GdUnitCmdTool.gd -a res://tests --ignoreHeadlessMode -c
+```
+
+That command should be the default test command for routine validation because it avoids opening a Godot window. It intentionally produces little or no output on success; rely on the process exit code. If you need failure details while debugging, remove `--quiet`.
 
 This repository is an editor-addon project and currently has no main scene, so `godot --headless --quit` exits with `Can't run project: no main scene defined in the project` and does not validate plugin startup. Use the headless editor command above to compile tool scripts and initialize enabled editor plugins.
 
@@ -52,11 +61,11 @@ Text files are normalized to LF line endings through `.gitattributes`. Keep file
 
 ## Testing Guidelines
 
-No automated test framework is configured yet. For now, validate addon changes manually in the Godot editor and run the headless editor smoke check above. When changing plugin startup or shutdown behavior, verify enabling and disabling the addon from Project Settings does not leave stale autoloads, editor UI, or resources behind.
+gdUnit4 is the automated test framework for this project. Add new GDScript test suites under `tests/` with `extends GdUnitTestSuite`, mirroring the addon feature under test. Prefer tests that create small in-memory scenes, meshes, materials, or temporary resources over tests that depend on large imported fixtures.
+
+Run the quiet headless gdUnit4 command above before submitting changes. Also run `godot --headless --editor --quit` when changing plugin startup, shutdown, tool scripts, or editor-only UI because the gdUnit4 runner validates addon behavior outside the editor dock lifecycle. When changing plugin startup or shutdown behavior, verify enabling and disabling the addon from Project Settings does not leave stale autoloads, editor UI, or resources behind.
 
 When testing imported 3D assets, remember that formats such as FBX can import at very small scales or without embedded materials/textures. Prefer checking the instantiated `Node3D` content, mesh bounds, preview framing, and explicit material/texture override paths instead of assuming the raw imported scene is already camera-ready.
-
-If tests are added later, place them in a predictable `tests/` directory and document the runner command here.
 
 ## Commit & Pull Request Guidelines
 
