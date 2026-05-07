@@ -7,9 +7,13 @@ static func build(viewport: SubViewport) -> Dictionary:
 	scene_root.name = "PreviewScene"
 	viewport.add_child(scene_root)
 
+	var object_root := Node3D.new()
+	object_root.name = "ObjectRoot"
+	scene_root.add_child(object_root)
+
 	var model_root := Node3D.new()
 	model_root.name = "ModelRoot"
-	scene_root.add_child(model_root)
+	object_root.add_child(model_root)
 
 	var camera := Camera3D.new()
 	camera.name = "PreviewCamera"
@@ -31,6 +35,7 @@ static func build(viewport: SubViewport) -> Dictionary:
 
 	return {
 		"scene_root": scene_root,
+		"object_root": object_root,
 		"model_root": model_root,
 		"camera": camera,
 		"world_environment": world_environment,

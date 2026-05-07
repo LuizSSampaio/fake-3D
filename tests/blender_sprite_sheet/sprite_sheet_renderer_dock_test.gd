@@ -28,6 +28,9 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_bool(_dock._viewport.transparent_bg).is_true()
 	assert_bool(_dock._checkerboard.visible).is_true()
 	assert_bool(_dock._background_color_picker.disabled).is_true()
+	assert_object(_dock._object_root).is_not_null()
+	assert_vector(_dock._object_root.position).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_POSITION)
+	assert_vector(_dock._object_root.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_ROTATION)
 	assert_vector(_dock._camera.position).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_POSITION)
 	assert_vector(_dock._camera.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_ROTATION)
 	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_PERSPECTIVE)
@@ -72,7 +75,7 @@ func test_fit_model_to_preview_centers_and_scales_to_target_size() -> void:
 	assert_vector(_dock._model_root.position).is_equal_approx(Vector3(-0.125, -0.25, -0.5), VECTOR_EPSILON)
 
 
-func test_load_source_instantiates_scene_fits_model_and_frames_camera() -> void:
+func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> void:
 	var source_path := _save_test_scene("load_source_model.tscn")
 
 	_dock._load_source(source_path)
@@ -84,7 +87,8 @@ func test_load_source_instantiates_scene_fits_model_and_frames_camera() -> void:
 	var bounds: Dictionary = _dock._calculate_model_bounds()
 	assert_bool(bounds.has_value).is_true()
 	assert_vector(bounds.aabb.size).is_equal_approx(Vector3(0.5, 0.75, 1.0), Vector3(0.01, 0.01, 0.01))
-	assert_float(_dock._camera.position.z).is_greater(0.0)
+	assert_vector(_dock._camera.position).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_POSITION)
+	assert_vector(_dock._camera.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_ROTATION)
 	assert_float(_dock._camera_orthographic_size_spin.value).is_greater(0.0)
 
 
@@ -150,6 +154,66 @@ func test_projection_selection_syncs_camera_and_editable_controls() -> void:
 	assert_bool(_dock._camera_fov_spin.editable).is_true()
 
 
+func test_object_transform_controls_move_object_root_without_moving_camera() -> void:
+	var camera_position: Vector3 = _dock._camera.position
+	var camera_rotation: Vector3 = _dock._camera.rotation_degrees
+	var object_position := Vector3(1.25, -0.5, 2.0)
+	var object_rotation := Vector3(10.0, 35.0, -15.0)
+
+	_set_vector3_spin_values(_dock._object_position_controls, object_position)
+	_set_vector3_spin_values(_dock._object_rotation_controls, object_rotation)
+	_dock._on_object_control_changed(0.0)
+
+	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
+	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
+	assert_vector(_dock._camera.position).is_equal(camera_position)
+	assert_vector(_dock._camera.rotation_degrees).is_equal(camera_rotation)
+
+
+func test_camera_lens_controls_keep_camera_pose_fixed() -> void:
+	_dock._camera.position = Vector3(99.0, 98.0, 97.0)
+	_dock._camera.rotation_degrees = Vector3(30.0, 40.0, 50.0)
+	_dock._camera_fov_spin.set_value_no_signal(45.0)
+
+	_dock._on_camera_control_changed(45.0)
+
+	assert_float(_dock._camera.fov).is_equal(45.0)
+	assert_vector(_dock._camera.position).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_POSITION)
+	assert_vector(_dock._camera.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_ROTATION)
+
+
+func test_reset_object_restores_object_transform_without_moving_camera() -> void:
+	_dock._load_source(_save_test_scene("reset_object_model.tscn"))
+	_dock._camera_orthographic_size_spin.set_value_no_signal(9.0)
+	_set_vector3_spin_values(_dock._object_position_controls, Vector3(3.0, 4.0, 5.0))
+	_set_vector3_spin_values(_dock._object_rotation_controls, Vector3(45.0, 90.0, 15.0))
+	_dock._on_object_control_changed(0.0)
+
+	_dock._reset_object()
+
+	assert_vector(_dock._object_root.position).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_POSITION)
+	assert_vector(_dock._object_root.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_ROTATION)
+	assert_vector(_dock._camera.position).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_POSITION)
+	assert_vector(_dock._camera.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_ROTATION)
+	assert_float(_dock._camera_orthographic_size_spin.value).is_equal_approx(9.0, 0.01)
+	assert_str(_dock._status_label.text).is_equal("Object transform reset.")
+
+
+func test_frame_model_resets_object_and_updates_framing_size() -> void:
+	_dock._load_source(_save_test_scene("frame_model.tscn"))
+	_dock._camera_orthographic_size_spin.set_value_no_signal(9.0)
+	_set_vector3_spin_values(_dock._object_position_controls, Vector3(3.0, 4.0, 5.0))
+	_set_vector3_spin_values(_dock._object_rotation_controls, Vector3(45.0, 90.0, 15.0))
+	_dock._on_object_control_changed(0.0)
+
+	_dock._frame_model()
+
+	assert_vector(_dock._object_root.position).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_POSITION)
+	assert_vector(_dock._object_root.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_ROTATION)
+	assert_float(_dock._camera_orthographic_size_spin.value).is_not_equal(9.0)
+	assert_str(_dock._status_label.text).is_equal("Object framed in fixed camera view.")
+
+
 func _add_mesh_instance(parent: Node, size: Vector3, position: Vector3, is_visible := true) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
 	mesh.size = size
@@ -164,6 +228,12 @@ func _add_mesh_instance(parent: Node, size: Vector3, position: Vector3, is_visib
 	elif parent.get_parent() == null:
 		mesh_instance.owner = parent
 	return mesh_instance
+
+
+func _set_vector3_spin_values(controls: Array[SpinBox], value: Vector3) -> void:
+	controls[0].set_value_no_signal(value.x)
+	controls[1].set_value_no_signal(value.y)
+	controls[2].set_value_no_signal(value.z)
 
 
 func _save_test_scene(file_name: String) -> String:

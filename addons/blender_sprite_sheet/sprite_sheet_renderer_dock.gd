@@ -11,6 +11,8 @@ const CameraController := preload("res://addons/blender_sprite_sheet/sprite_shee
 const SUPPORTED_EXTENSIONS := SourceLoader.SUPPORTED_EXTENSIONS
 const DEFAULT_CAMERA_POSITION := Vector3(0.0, 1.5, 4.0)
 const DEFAULT_CAMERA_ROTATION := Vector3(-15.0, 0.0, 0.0)
+const DEFAULT_OBJECT_POSITION := Vector3.ZERO
+const DEFAULT_OBJECT_ROTATION := Vector3.ZERO
 const PREVIEW_MARGIN := 1.3
 const PREVIEW_TARGET_SIZE := 1.0
 
@@ -26,13 +28,14 @@ var _checkerboard: CheckerboardBackdrop
 var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
 var _scene_root: Node3D
+var _object_root: Node3D
 var _model_root: Node3D
 var _camera: Camera3D
 var _world_environment: WorldEnvironment
 var _transparent_background_check: CheckBox
 var _background_color_picker: ColorPickerButton
-var _camera_position_controls: Array[SpinBox] = []
-var _camera_rotation_controls: Array[SpinBox] = []
+var _object_position_controls: Array[SpinBox] = []
+var _object_rotation_controls: Array[SpinBox] = []
 var _camera_fov_spin: SpinBox
 var _camera_projection_option: OptionButton
 var _camera_orthographic_size_spin: SpinBox
@@ -74,8 +77,8 @@ func _build_ui() -> void:
 	content.add_child(_create_section_label("Preview"))
 	content.add_child(_create_preview_controls())
 
-	content.add_child(_create_section_label("Camera"))
-	content.add_child(_create_camera_controls())
+	content.add_child(_create_section_label("Object"))
+	content.add_child(_create_object_controls())
 
 	content.add_child(_create_section_label("Material"))
 	content.add_child(_create_material_controls())
@@ -189,12 +192,12 @@ func _create_preview_controls() -> Control:
 	return _preview_stack
 
 
-func _create_camera_controls() -> Control:
+func _create_object_controls() -> Control:
 	var container := VBoxContainer.new()
 	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	_camera_position_controls = _create_vector3_row(container, "Position", DEFAULT_CAMERA_POSITION, -1000.0, 1000.0, 0.01, _on_camera_control_changed)
-	_camera_rotation_controls = _create_vector3_row(container, "Rotation", DEFAULT_CAMERA_ROTATION, -360.0, 360.0, 0.1, _on_camera_control_changed)
+	_object_position_controls = _create_vector3_row(container, "Position", DEFAULT_OBJECT_POSITION, -1000.0, 1000.0, 0.01, _on_object_control_changed)
+	_object_rotation_controls = _create_vector3_row(container, "Rotation", DEFAULT_OBJECT_ROTATION, -360.0, 360.0, 0.1, _on_object_control_changed)
 
 	var projection_row := HBoxContainer.new()
 	projection_row.add_child(_create_row_label("Projection"))
@@ -220,8 +223,8 @@ func _create_camera_controls() -> Control:
 	container.add_child(frame_button)
 
 	var reset_button := Button.new()
-	reset_button.text = "Reset Camera"
-	reset_button.pressed.connect(_reset_camera)
+	reset_button.text = "Reset Object"
+	reset_button.pressed.connect(_reset_object)
 	container.add_child(reset_button)
 
 	return container
@@ -320,6 +323,7 @@ func _create_file_dialog(title: String, selected_callback: Callable) -> EditorFi
 func _build_preview_scene() -> void:
 	var preview_scene := PreviewScene.build(_viewport)
 	_scene_root = preview_scene.scene_root
+	_object_root = preview_scene.object_root
 	_model_root = preview_scene.model_root
 	_camera = preview_scene.camera
 	_world_environment = preview_scene.world_environment
@@ -390,6 +394,7 @@ func _load_source(path: String) -> void:
 		return
 
 	_clear_loaded_source()
+	_reset_object_transform()
 	_model_root.position = Vector3.ZERO
 	_model_root.scale = Vector3.ONE
 	_loaded_source = load_result.instance
@@ -416,6 +421,7 @@ func _clear_loaded_source() -> void:
 	if is_instance_valid(_loaded_source):
 		_loaded_source.queue_free()
 	_loaded_source = null
+	_reset_object_transform()
 	if _model_root:
 		_model_root.position = Vector3.ZERO
 		_model_root.scale = Vector3.ONE
@@ -466,37 +472,50 @@ func _frame_model() -> void:
 		_set_status("Load a source asset with at least one visible mesh before framing.", true)
 		return
 
+	_reset_object_transform()
+	bounds = _calculate_model_bounds()
 	_frame_bounds(bounds.aabb)
-	_set_status("Camera framed to loaded model.", false)
+	_set_status("Object framed in fixed camera view.", false)
+
+
+func _reset_object() -> void:
+	_reset_object_transform()
+	_sync_camera_from_controls()
+	_set_status("Object transform reset.", false)
 
 
 func _reset_camera() -> void:
-	var bounds := _calculate_model_bounds()
-	if bounds.has_value:
-		_frame_bounds(bounds.aabb)
-	else:
-		_set_vector3_controls(_camera_position_controls, DEFAULT_CAMERA_POSITION)
-		_set_vector3_controls(_camera_rotation_controls, DEFAULT_CAMERA_ROTATION)
-		_camera_fov_spin.set_value_no_signal(70.0)
-		_camera_orthographic_size_spin.set_value_no_signal(4.0)
-		_sync_camera_from_controls()
+	_reset_object()
+
+
+func _reset_object_transform() -> void:
+	if _object_position_controls.is_empty() or _object_rotation_controls.is_empty():
+		return
+
+	_set_vector3_controls(_object_position_controls, DEFAULT_OBJECT_POSITION)
+	_set_vector3_controls(_object_rotation_controls, DEFAULT_OBJECT_ROTATION)
+	_sync_object_from_controls()
 
 
 func _frame_bounds(bounds: AABB) -> void:
 	CameraController.frame_bounds(
 		_camera,
-		_camera_position_controls,
-		_camera_rotation_controls,
 		_camera_fov_spin,
 		_camera_orthographic_size_spin,
 		_camera_projection_option,
 		bounds,
-		PREVIEW_MARGIN
+		PREVIEW_MARGIN,
+		DEFAULT_CAMERA_POSITION,
+		DEFAULT_CAMERA_ROTATION
 	)
 
 
 func _set_vector3_controls(controls: Array[SpinBox], value: Vector3) -> void:
 	CameraController.set_vector3_controls(controls, value)
+
+
+func _on_object_control_changed(_value: float) -> void:
+	_sync_object_from_controls()
 
 
 func _on_camera_control_changed(_value: float) -> void:
@@ -510,11 +529,19 @@ func _on_projection_selected(_index: int) -> void:
 func _sync_camera_from_controls() -> void:
 	CameraController.sync_from_controls(
 		_camera,
-		_camera_position_controls,
-		_camera_rotation_controls,
 		_camera_projection_option,
 		_camera_fov_spin,
-		_camera_orthographic_size_spin
+		_camera_orthographic_size_spin,
+		DEFAULT_CAMERA_POSITION,
+		DEFAULT_CAMERA_ROTATION
+	)
+
+
+func _sync_object_from_controls() -> void:
+	CameraController.sync_object_from_controls(
+		_object_root,
+		_object_position_controls,
+		_object_rotation_controls
 	)
 
 
