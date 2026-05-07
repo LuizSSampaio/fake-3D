@@ -3,6 +3,7 @@ extends GdUnitTestSuite
 
 const SpriteSheetRendererDock := preload("res://addons/blender_sprite_sheet/sprite_sheet_renderer_dock.gd")
 const SpriteSheetExporter := preload("res://addons/blender_sprite_sheet/sprite_sheet_exporter.gd")
+const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_frame_overlay.gd")
 const VECTOR_EPSILON := Vector3(0.001, 0.001, 0.001)
 
 var _dock: VBoxContainer
@@ -27,7 +28,10 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_str(_dock._status_label.text).is_equal("Select a supported 3D asset to preview.")
 	assert_object(_dock._viewport).is_not_null()
 	assert_bool(_dock._viewport.transparent_bg).is_true()
+	assert_bool(_dock._preview_stack.clip_contents).is_true()
 	assert_bool(_dock._checkerboard.visible).is_true()
+	assert_object(_dock._export_frame_overlay).is_not_null()
+	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(256, 256))
 	assert_bool(_dock._background_color_picker.disabled).is_true()
 	assert_object(_dock._object_root).is_not_null()
 	assert_vector(_dock._object_root.position).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_POSITION)
@@ -97,6 +101,24 @@ func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> 
 	assert_int(int(_dock._columns_spin.value)).is_equal(1)
 	assert_int(int(_dock._frame_spacing_spin.value)).is_equal(0)
 	assert_str(_dock._export_result_label.text).is_equal("Static PNG export is ready after a source is loaded.")
+
+
+func test_preview_export_overlay_tracks_export_aspect_ratio() -> void:
+	var wide_rect := ExportFrameOverlay.calculate_export_rect(Vector2(320.0, 240.0), Vector2i(512, 256))
+	assert_vector(wide_rect.position).is_equal_approx(Vector2(0.0, 40.0), Vector2(0.001, 0.001))
+	assert_vector(wide_rect.size).is_equal_approx(Vector2(320.0, 160.0), Vector2(0.001, 0.001))
+
+	var tall_rect := ExportFrameOverlay.calculate_export_rect(Vector2(320.0, 240.0), Vector2i(128, 256))
+	assert_vector(tall_rect.position).is_equal_approx(Vector2(100.0, 0.0), Vector2(0.001, 0.001))
+	assert_vector(tall_rect.size).is_equal_approx(Vector2(120.0, 240.0), Vector2(0.001, 0.001))
+
+
+func test_export_dimension_controls_update_preview_overlay() -> void:
+	_dock._frame_width_spin.set_value_no_signal(512.0)
+	_dock._frame_height_spin.set_value_no_signal(128.0)
+	_dock._on_export_dimensions_changed(0.0)
+
+	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(512, 128))
 
 
 func test_apply_material_settings_sets_and_clears_surface_overrides() -> void:

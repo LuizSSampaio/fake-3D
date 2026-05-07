@@ -6,6 +6,7 @@ const SourceLoader := preload("res://addons/blender_sprite_sheet/sprite_sheet_so
 const ModelUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_model_utils.gd")
 const MaterialApplier := preload("res://addons/blender_sprite_sheet/sprite_sheet_material_applier.gd")
 const PreviewScene := preload("res://addons/blender_sprite_sheet/sprite_sheet_preview_scene.gd")
+const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_frame_overlay.gd")
 const CameraController := preload("res://addons/blender_sprite_sheet/sprite_sheet_camera_controller.gd")
 const Capture := preload("res://addons/blender_sprite_sheet/sprite_sheet_capture.gd")
 const Exporter := preload("res://addons/blender_sprite_sheet/sprite_sheet_exporter.gd")
@@ -29,6 +30,7 @@ var _output_file_dialog: EditorFileDialog
 var _preview_stack: Control
 var _checkerboard: CheckerboardBackdrop
 var _viewport_container: SubViewportContainer
+var _export_frame_overlay: ExportFrameOverlay
 var _viewport: SubViewport
 var _scene_root: Node3D
 var _object_root: Node3D
@@ -62,6 +64,7 @@ func _ready() -> void:
 	_build_preview_scene()
 	_sync_camera_from_controls()
 	_update_background()
+	_update_export_frame_overlay()
 
 
 func _exit_tree() -> void:
@@ -188,6 +191,7 @@ func _create_preview_controls() -> Control:
 	_preview_stack.custom_minimum_size = Vector2(320, 240)
 	_preview_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_preview_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_preview_stack.clip_contents = true
 
 	_checkerboard = CheckerboardBackdrop.new()
 	_checkerboard.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -204,6 +208,10 @@ func _create_preview_controls() -> Control:
 	_viewport.own_world_3d = true
 	_viewport.transparent_bg = true
 	_viewport_container.add_child(_viewport)
+
+	_export_frame_overlay = ExportFrameOverlay.new()
+	_export_frame_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_preview_stack.add_child(_export_frame_overlay)
 
 	return _preview_stack
 
@@ -270,9 +278,11 @@ func _create_export_controls() -> Control:
 
 	_frame_width_spin = _create_spin_box(1.0, 8192.0, 1.0, 256.0)
 	_add_labeled_control(container, "Width", _frame_width_spin)
+	_frame_width_spin.value_changed.connect(_on_export_dimensions_changed)
 
 	_frame_height_spin = _create_spin_box(1.0, 8192.0, 1.0, 256.0)
 	_add_labeled_control(container, "Height", _frame_height_spin)
+	_frame_height_spin.value_changed.connect(_on_export_dimensions_changed)
 
 	_frame_count_spin = _create_spin_box(1.0, 10000.0, 1.0, 1.0)
 	_add_labeled_control(container, "Frames", _frame_count_spin)
@@ -650,6 +660,10 @@ func _on_background_color_changed(_color: Color) -> void:
 	_update_background()
 
 
+func _on_export_dimensions_changed(_value: float) -> void:
+	_update_export_frame_overlay()
+
+
 func _update_background() -> void:
 	var transparent := _transparent_background_check.button_pressed
 	_viewport.transparent_bg = transparent
@@ -658,6 +672,16 @@ func _update_background() -> void:
 
 	if _world_environment and _world_environment.environment:
 		_world_environment.environment.background_color = _background_color_picker.color
+
+
+func _update_export_frame_overlay() -> void:
+	if _export_frame_overlay == null or _frame_width_spin == null or _frame_height_spin == null:
+		return
+
+	_export_frame_overlay.set_frame_size(Vector2i(
+		int(round(_frame_width_spin.value)),
+		int(round(_frame_height_spin.value))
+	))
 
 
 func _collect_export_settings() -> Dictionary:
