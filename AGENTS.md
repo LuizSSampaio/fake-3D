@@ -22,8 +22,18 @@ godot --editor
 Run a headless project check before submitting changes:
 
 ```sh
-godot --headless --quit
+godot --headless --editor --quit
 ```
+
+This repository is an editor-addon project and currently has no main scene, so `godot --headless --quit` exits with `Can't run project: no main scene defined in the project` and does not validate plugin startup. Use the headless editor command above to compile tool scripts and initialize enabled editor plugins.
+
+For focused addon workflow checks, run a temporary `SceneTree` script through the headless editor, for example:
+
+```sh
+godot --headless --editor --script /tmp/check_sprite_sheet_dock.gd
+```
+
+That style is useful for loading a fixture such as `res://SO_Book_01.fbx`, instantiating `sprite_sheet_renderer_dock.gd`, and checking source loading, camera framing, or material override behavior without opening the interactive editor.
 
 If your Godot binary has a version suffix, use it consistently, for example `godot4 --editor`.
 
@@ -42,7 +52,9 @@ Text files are normalized to LF line endings through `.gitattributes`. Keep file
 
 ## Testing Guidelines
 
-No automated test framework is configured yet. For now, validate addon changes manually in the Godot editor and run the headless smoke check above. When changing plugin startup or shutdown behavior, verify enabling and disabling the addon from Project Settings does not leave stale autoloads, editor UI, or resources behind.
+No automated test framework is configured yet. For now, validate addon changes manually in the Godot editor and run the headless editor smoke check above. When changing plugin startup or shutdown behavior, verify enabling and disabling the addon from Project Settings does not leave stale autoloads, editor UI, or resources behind.
+
+When testing imported 3D assets, remember that formats such as FBX can import at very small scales or without embedded materials/textures. Prefer checking the instantiated `Node3D` content, mesh bounds, preview framing, and explicit material/texture override paths instead of assuming the raw imported scene is already camera-ready.
 
 If tests are added later, place them in a predictable `tests/` directory and document the runner command here.
 
