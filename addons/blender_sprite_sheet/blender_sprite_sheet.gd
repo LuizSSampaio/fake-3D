@@ -1,22 +1,18 @@
 @tool
 extends EditorPlugin
 
+const SpriteSheetRendererDock := preload("res://addons/blender_sprite_sheet/sprite_sheet_renderer_dock.gd")
 
-func _enable_plugin() -> void:
-	# Add autoloads here.
-	pass
-
-
-func _disable_plugin() -> void:
-	# Remove autoloads here.
-	pass
+var _dock: Control
 
 
 func _enter_tree() -> void:
-	# Initialization of the plugin goes here.
-	pass
+	_dock = SpriteSheetRendererDock.new()
+	add_control_to_dock(DOCK_SLOT_RIGHT_UL, _dock)
 
 
 func _exit_tree() -> void:
-	# Clean-up of the plugin goes here.
-	pass
+	if _dock:
+		remove_control_from_docks(_dock)
+		_dock.queue_free()
+		_dock = null
