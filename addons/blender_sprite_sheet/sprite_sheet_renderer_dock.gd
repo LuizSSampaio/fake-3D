@@ -1,11 +1,16 @@
 @tool
 extends VBoxContainer
 
-const SUPPORTED_EXTENSIONS := ["tscn", "scn", "glb", "gltf", "obj", "fbx", "blend"]
+const CheckerboardBackdrop := preload("res://addons/blender_sprite_sheet/checkerboard_backdrop.gd")
+const SourceLoader := preload("res://addons/blender_sprite_sheet/sprite_sheet_source_loader.gd")
+const ModelUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_model_utils.gd")
+const MaterialApplier := preload("res://addons/blender_sprite_sheet/sprite_sheet_material_applier.gd")
+const PreviewScene := preload("res://addons/blender_sprite_sheet/sprite_sheet_preview_scene.gd")
+const CameraController := preload("res://addons/blender_sprite_sheet/sprite_sheet_camera_controller.gd")
+
+const SUPPORTED_EXTENSIONS := SourceLoader.SUPPORTED_EXTENSIONS
 const DEFAULT_CAMERA_POSITION := Vector3(0.0, 1.5, 4.0)
 const DEFAULT_CAMERA_ROTATION := Vector3(-15.0, 0.0, 0.0)
-const CHECKER_LIGHT := Color(0.48, 0.48, 0.48)
-const CHECKER_DARK := Color(0.36, 0.36, 0.36)
 const PREVIEW_MARGIN := 1.3
 const PREVIEW_TARGET_SIZE := 1.0
 
@@ -32,23 +37,6 @@ var _camera_fov_spin: SpinBox
 var _camera_projection_option: OptionButton
 var _camera_orthographic_size_spin: SpinBox
 var _loaded_source: Node
-
-
-class CheckerboardBackdrop:
-	extends Control
-
-	var tile_size := 16
-
-	func _ready() -> void:
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	func _draw() -> void:
-		var rect_size := get_size()
-		for y in range(0, int(rect_size.y) + tile_size, tile_size):
-			for x in range(0, int(rect_size.x) + tile_size, tile_size):
-				var checker_index := int(x / tile_size) + int(y / tile_size)
-				var color := CHECKER_LIGHT if checker_index % 2 == 0 else CHECKER_DARK
-				draw_rect(Rect2(Vector2(x, y), Vector2(tile_size, tile_size)), color)
 
 
 func _ready() -> void:
@@ -330,40 +318,11 @@ func _create_file_dialog(title: String, selected_callback: Callable) -> EditorFi
 
 
 func _build_preview_scene() -> void:
-	_scene_root = Node3D.new()
-	_scene_root.name = "PreviewScene"
-	_viewport.add_child(_scene_root)
-
-	_model_root = Node3D.new()
-	_model_root.name = "ModelRoot"
-	_scene_root.add_child(_model_root)
-
-	_camera = Camera3D.new()
-	_camera.name = "PreviewCamera"
-	_camera.current = true
-	_camera.near = 0.001
-	_camera.far = 10000.0
-	_scene_root.add_child(_camera)
-
-	var key_light := DirectionalLight3D.new()
-	key_light.name = "KeyLight"
-	key_light.light_energy = 2.0
-	key_light.rotation_degrees = Vector3(-45.0, -30.0, 0.0)
-	_scene_root.add_child(key_light)
-
-	var fill_light := DirectionalLight3D.new()
-	fill_light.name = "FillLight"
-	fill_light.light_energy = 0.7
-	fill_light.rotation_degrees = Vector3(-20.0, 120.0, 0.0)
-	_scene_root.add_child(fill_light)
-
-	_world_environment = WorldEnvironment.new()
-	_world_environment.environment = Environment.new()
-	_world_environment.environment.background_mode = Environment.BG_COLOR
-	_world_environment.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	_world_environment.environment.ambient_light_color = Color.WHITE
-	_world_environment.environment.ambient_light_energy = 0.35
-	_scene_root.add_child(_world_environment)
+	var preview_scene := PreviewScene.build(_viewport)
+	_scene_root = preview_scene.scene_root
+	_model_root = preview_scene.model_root
+	_camera = preview_scene.camera
+	_world_environment = preview_scene.world_environment
 
 
 func _on_browse_pressed() -> void:
@@ -425,59 +384,32 @@ func _reload_source() -> void:
 
 
 func _load_source(path: String) -> void:
-	path = path.strip_edges()
-	if path.is_empty():
-		_set_status("Choose a source asset before reloading.", true)
-		return
-
-	if not _is_supported_source_path(path):
-		_set_status("Unsupported source type. Choose .tscn, .scn, .glb, .gltf, .obj, .fbx, or .blend.", true)
-		return
-
-	if not ResourceLoader.exists(path):
-		_set_status("Source asset does not exist: %s" % path, true)
-		return
-
-	var resource := ResourceLoader.load(path)
-	if resource == null:
-		_set_status("Godot could not load the source asset: %s" % path, true)
-		return
-
-	var instance := _instantiate_resource(resource)
-	if instance == null:
-		_set_status("Source asset cannot be instantiated as 3D content: %s" % path, true)
+	var load_result := SourceLoader.load_source(path)
+	if not load_result.ok:
+		_set_status(load_result.message, true)
 		return
 
 	_clear_loaded_source()
 	_model_root.position = Vector3.ZERO
 	_model_root.scale = Vector3.ONE
-	_loaded_source = instance
+	_loaded_source = load_result.instance
 	_model_root.add_child(_loaded_source)
 
 	var bounds := _calculate_model_bounds()
 	if not bounds.has_value:
 		_clear_loaded_source()
-		_set_status("No visible mesh found in source asset: %s" % path, true)
+		_set_status("No visible mesh found in source asset: %s" % load_result.path, true)
 		return
 
 	_fit_model_to_preview(bounds.aabb)
 	bounds = _calculate_model_bounds()
 	_apply_material_settings(false)
 	_frame_bounds(bounds.aabb)
-	_set_status("Loaded %s" % path.get_file(), false)
+	_set_status("Loaded %s" % (load_result.path as String).get_file(), false)
 
 
 func _instantiate_resource(resource: Resource) -> Node:
-	if resource is PackedScene:
-		return (resource as PackedScene).instantiate()
-
-	if resource is Mesh:
-		var mesh_instance := MeshInstance3D.new()
-		mesh_instance.mesh = resource
-		mesh_instance.name = resource.resource_path.get_file().get_basename()
-		return mesh_instance
-
-	return null
+	return SourceLoader.instantiate_resource(resource)
 
 
 func _clear_loaded_source() -> void:
@@ -490,41 +422,15 @@ func _clear_loaded_source() -> void:
 
 
 func _is_supported_source_path(path: String) -> bool:
-	var extension := path.get_extension().to_lower()
-	return SUPPORTED_EXTENSIONS.has(extension)
+	return SourceLoader.is_supported_source_path(path)
 
 
 func _calculate_model_bounds() -> Dictionary:
-	var mesh_instances := _find_mesh_instances(_model_root)
-	var has_value := false
-	var bounds := AABB()
-
-	for mesh_instance in mesh_instances:
-		var local_aabb := mesh_instance.get_aabb()
-		if local_aabb.size == Vector3.ZERO:
-			continue
-
-		var global_aabb := _transform_aabb(mesh_instance.global_transform, local_aabb)
-		if has_value:
-			bounds = bounds.merge(global_aabb)
-		else:
-			bounds = global_aabb
-			has_value = true
-
-	return {
-		"has_value": has_value,
-		"aabb": bounds,
-	}
+	return ModelUtils.calculate_model_bounds(_model_root)
 
 
 func _fit_model_to_preview(bounds: AABB) -> void:
-	var largest_axis := max(bounds.size.x, max(bounds.size.y, bounds.size.z))
-	var preview_scale := 1.0
-	if largest_axis > 0.0:
-		preview_scale = PREVIEW_TARGET_SIZE / largest_axis
-
-	_model_root.scale = Vector3.ONE * preview_scale
-	_model_root.position = -bounds.get_center() * preview_scale
+	ModelUtils.fit_model_to_preview(_model_root, bounds, PREVIEW_TARGET_SIZE)
 
 
 func _apply_material_settings(show_status := true) -> void:
@@ -533,98 +439,25 @@ func _apply_material_settings(show_status := true) -> void:
 			_set_status("Load a source asset before applying material settings.", true)
 		return
 
-	var material_path := _material_path_edit.text.strip_edges()
-	var texture_path := _texture_path_edit.text.strip_edges()
-	if material_path.is_empty() and texture_path.is_empty():
-		_set_mesh_surface_override(null)
-		if show_status:
-			_set_status("Cleared preview material override.", false)
-		return
-
-	var material: Material = null
-	if not material_path.is_empty():
-		if not ResourceLoader.exists(material_path):
-			if show_status:
-				_set_status("Material resource does not exist: %s" % material_path, true)
-			return
-
-		var material_resource := ResourceLoader.load(material_path)
-		if not (material_resource is Material):
-			if show_status:
-				_set_status("Selected resource is not a Material: %s" % material_path, true)
-			return
-		material = (material_resource as Material).duplicate(true)
-
-	var texture: Texture2D = null
-	if not texture_path.is_empty():
-		if not ResourceLoader.exists(texture_path):
-			if show_status:
-				_set_status("Texture resource does not exist: %s" % texture_path, true)
-			return
-
-		var texture_resource := ResourceLoader.load(texture_path)
-		if not (texture_resource is Texture2D):
-			if show_status:
-				_set_status("Selected resource is not a Texture2D: %s" % texture_path, true)
-			return
-		texture = texture_resource as Texture2D
-
-	if material == null:
-		material = StandardMaterial3D.new()
-
-	if texture != null:
-		if _has_object_property(material, "albedo_texture"):
-			material.set("albedo_texture", texture)
-		elif show_status:
-			_set_status("Selected material does not support an albedo texture property.", true)
-			return
-
-	_set_mesh_surface_override(material)
+	var result := MaterialApplier.apply_to_model(_model_root, _material_path_edit.text, _texture_path_edit.text)
 	if show_status:
-		_set_status("Applied preview material to loaded model.", false)
+		_set_status(result.message, not result.ok)
 
 
 func _set_mesh_surface_override(material: Material) -> void:
-	for mesh_instance in _find_mesh_instances(_model_root):
-		if mesh_instance.mesh == null:
-			continue
-
-		for surface_index in range(mesh_instance.mesh.get_surface_count()):
-			mesh_instance.set_surface_override_material(surface_index, material)
+	MaterialApplier.set_mesh_surface_override(_model_root, material)
 
 
 func _has_object_property(object: Object, property_name: String) -> bool:
-	for property_info in object.get_property_list():
-		if property_info["name"] == property_name:
-			return true
-	return false
+	return MaterialApplier.has_object_property(object, property_name)
 
 
 func _find_mesh_instances(root: Node) -> Array[MeshInstance3D]:
-	var result: Array[MeshInstance3D] = []
-	for child in root.get_children():
-		if child is MeshInstance3D and child.visible:
-			result.append(child)
-		result.append_array(_find_mesh_instances(child))
-	return result
+	return ModelUtils.find_mesh_instances(root)
 
 
 func _transform_aabb(transform: Transform3D, aabb: AABB) -> AABB:
-	var points := [
-		Vector3(aabb.position.x, aabb.position.y, aabb.position.z),
-		Vector3(aabb.end.x, aabb.position.y, aabb.position.z),
-		Vector3(aabb.position.x, aabb.end.y, aabb.position.z),
-		Vector3(aabb.position.x, aabb.position.y, aabb.end.z),
-		Vector3(aabb.end.x, aabb.end.y, aabb.position.z),
-		Vector3(aabb.end.x, aabb.position.y, aabb.end.z),
-		Vector3(aabb.position.x, aabb.end.y, aabb.end.z),
-		Vector3(aabb.end.x, aabb.end.y, aabb.end.z),
-	]
-
-	var transformed := AABB(transform * points[0], Vector3.ZERO)
-	for index in range(1, points.size()):
-		transformed = transformed.expand(transform * points[index])
-	return transformed
+	return ModelUtils.transform_aabb(transform, aabb)
 
 
 func _frame_model() -> void:
@@ -650,25 +483,20 @@ func _reset_camera() -> void:
 
 
 func _frame_bounds(bounds: AABB) -> void:
-	var center := bounds.get_center()
-	var radius := max(bounds.size.length() * 0.5, 0.01)
-	var fov_radians := deg_to_rad(max(_camera_fov_spin.value, 1.0))
-	var distance: float = radius / tan(fov_radians * 0.5)
-	distance = max(max(distance * PREVIEW_MARGIN, radius * 2.0), 1.0)
-
-	var camera_position := center + Vector3(0.0, radius * 0.2, distance)
-	_set_vector3_controls(_camera_position_controls, camera_position)
-	var largest_axis := max(bounds.size.x, max(bounds.size.y, bounds.size.z))
-	_camera_orthographic_size_spin.set_value_no_signal(max(largest_axis * PREVIEW_MARGIN, 0.01))
-	_sync_camera_from_controls()
-	_camera.look_at(center, Vector3.UP)
-	_set_vector3_controls(_camera_rotation_controls, _camera.rotation_degrees)
+	CameraController.frame_bounds(
+		_camera,
+		_camera_position_controls,
+		_camera_rotation_controls,
+		_camera_fov_spin,
+		_camera_orthographic_size_spin,
+		_camera_projection_option,
+		bounds,
+		PREVIEW_MARGIN
+	)
 
 
 func _set_vector3_controls(controls: Array[SpinBox], value: Vector3) -> void:
-	controls[0].set_value_no_signal(value.x)
-	controls[1].set_value_no_signal(value.y)
-	controls[2].set_value_no_signal(value.z)
+	CameraController.set_vector3_controls(controls, value)
 
 
 func _on_camera_control_changed(_value: float) -> void:
@@ -680,24 +508,14 @@ func _on_projection_selected(_index: int) -> void:
 
 
 func _sync_camera_from_controls() -> void:
-	if not _camera:
-		return
-
-	_camera.position = Vector3(
-		_camera_position_controls[0].value,
-		_camera_position_controls[1].value,
-		_camera_position_controls[2].value
+	CameraController.sync_from_controls(
+		_camera,
+		_camera_position_controls,
+		_camera_rotation_controls,
+		_camera_projection_option,
+		_camera_fov_spin,
+		_camera_orthographic_size_spin
 	)
-	_camera.rotation_degrees = Vector3(
-		_camera_rotation_controls[0].value,
-		_camera_rotation_controls[1].value,
-		_camera_rotation_controls[2].value
-	)
-	_camera.projection = _camera_projection_option.get_item_id(_camera_projection_option.selected)
-	_camera.fov = _camera_fov_spin.value
-	_camera.size = _camera_orthographic_size_spin.value
-	_camera_orthographic_size_spin.editable = _camera.projection == Camera3D.PROJECTION_ORTHOGONAL
-	_camera_fov_spin.editable = _camera.projection == Camera3D.PROJECTION_PERSPECTIVE
 
 
 func _on_transparent_background_toggled(_button_pressed: bool) -> void:
