@@ -2,6 +2,7 @@ class_name SpriteSheetRendererDockTest
 extends GdUnitTestSuite
 
 const SpriteSheetRendererDock := preload("res://addons/blender_sprite_sheet/sprite_sheet_renderer_dock.gd")
+const SpriteSheetExporter := preload("res://addons/blender_sprite_sheet/sprite_sheet_exporter.gd")
 const VECTOR_EPSILON := Vector3(0.001, 0.001, 0.001)
 
 var _dock: VBoxContainer
@@ -90,6 +91,12 @@ func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> 
 	assert_vector(_dock._camera.position).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_POSITION)
 	assert_vector(_dock._camera.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_ROTATION)
 	assert_float(_dock._camera_orthographic_size_spin.value).is_greater(0.0)
+	assert_int(int(_dock._frame_width_spin.value)).is_equal(256)
+	assert_int(int(_dock._frame_height_spin.value)).is_equal(256)
+	assert_int(int(_dock._frame_count_spin.value)).is_equal(1)
+	assert_int(int(_dock._columns_spin.value)).is_equal(1)
+	assert_int(int(_dock._frame_spacing_spin.value)).is_equal(0)
+	assert_str(_dock._export_result_label.text).is_equal("Static PNG export is ready after a source is loaded.")
 
 
 func test_apply_material_settings_sets_and_clears_surface_overrides() -> void:
@@ -214,6 +221,112 @@ func test_frame_model_resets_object_and_updates_framing_size() -> void:
 	assert_str(_dock._status_label.text).is_equal("Object framed in fixed camera view.")
 
 
+func test_export_validation_reports_missing_source_and_invalid_output_settings() -> void:
+	_dock._output_path_edit.text = _temp_resource_path("missing_source.png")
+
+	var validation: Dictionary = _dock._validate_export_settings()
+
+	assert_bool(validation.ok).is_false()
+	assert_str(validation.message).is_equal("Load a source asset before exporting.")
+
+	_dock._load_source(_save_test_scene("export_validation_model.tscn"))
+	_dock._output_path_edit.text = ""
+	validation = _dock._validate_export_settings()
+
+	assert_bool(validation.ok).is_false()
+	assert_str(validation.message).is_equal("Choose an output PNG path before exporting.")
+
+	_dock._output_path_edit.text = _temp_resource_path("export_validation.txt")
+	validation = _dock._validate_export_settings()
+
+	assert_bool(validation.ok).is_false()
+	assert_str(validation.message).is_equal("Output format must be PNG for static sprite export.")
+
+
+func test_exporter_layout_accounts_for_columns_rows_and_spacing() -> void:
+	var layout := SpriteSheetExporter.calculate_layout(5, 2, 16, 8, 3)
+
+	assert_int(layout.columns).is_equal(2)
+	assert_int(layout.rows).is_equal(3)
+	assert_vector(layout.sheet_size).is_equal(Vector2i(35, 30))
+
+
+func test_exporter_assembles_sheet_and_keeps_empty_trailing_cells_transparent() -> void:
+	var frames: Array[Image] = [
+		_create_color_image(2, 2, Color(1.0, 0.0, 0.0, 1.0)),
+		_create_color_image(2, 2, Color(0.0, 1.0, 0.0, 1.0)),
+		_create_color_image(2, 2, Color(0.0, 0.0, 1.0, 1.0)),
+	]
+
+	var sheet := SpriteSheetExporter.assemble_sprite_sheet(frames, 2, 2, 2, 1)
+
+	assert_vector(sheet.get_size()).is_equal(Vector2i(5, 5))
+	assert_that(sheet.get_pixel(0, 0)).is_equal(Color(1.0, 0.0, 0.0, 1.0))
+	assert_that(sheet.get_pixel(3, 0)).is_equal(Color(0.0, 1.0, 0.0, 1.0))
+	assert_that(sheet.get_pixel(0, 3)).is_equal(Color(0.0, 0.0, 1.0, 1.0))
+	assert_float(sheet.get_pixel(3, 3).a).is_equal(0.0)
+
+
+func test_exporter_writes_sprite_sheet_and_individual_png_frames() -> void:
+	var output_path := _temp_resource_path("static_export.png")
+	var frames: Array[Image] = [
+		_create_color_image(4, 4, Color(1.0, 0.0, 0.0, 1.0)),
+		_create_color_image(4, 4, Color(0.0, 1.0, 0.0, 1.0)),
+	]
+	var settings := {
+		"frame_width": 4,
+		"frame_height": 4,
+		"frame_count": 2,
+		"columns": 2,
+		"frame_spacing": 1,
+		"output_path": output_path,
+		"export_individual_frames": true,
+	}
+
+	var export_result := SpriteSheetExporter.export_pngs(frames, settings)
+	var frame_paths := SpriteSheetExporter.get_individual_frame_paths(output_path, 2)
+
+	assert_bool(export_result.ok).is_true()
+	assert_vector(export_result.sheet_size).is_equal(Vector2i(9, 4))
+	assert_bool(FileAccess.file_exists(output_path)).is_true()
+	assert_bool(FileAccess.file_exists(frame_paths[0])).is_true()
+	assert_bool(FileAccess.file_exists(frame_paths[1])).is_true()
+	assert_str(frame_paths[0]).ends_with("_000.png")
+	assert_str(frame_paths[1]).ends_with("_001.png")
+
+	var sheet := Image.load_from_file(output_path)
+	assert_object(sheet).is_not_null()
+	assert_vector(sheet.get_size()).is_equal(Vector2i(9, 4))
+
+
+func test_dock_static_export_writes_sheet_and_repeated_individual_frames_from_capture() -> void:
+	_dock._load_source(_save_test_scene("dock_export_model.tscn"))
+	_dock._frame_width_spin.set_value_no_signal(16.0)
+	_dock._frame_height_spin.set_value_no_signal(16.0)
+	_dock._frame_count_spin.set_value_no_signal(2.0)
+	_dock._columns_spin.set_value_no_signal(2.0)
+	_dock._frame_spacing_spin.set_value_no_signal(2.0)
+	_dock._export_individual_frames_check.button_pressed = true
+	var output_path := _temp_resource_path("dock_static_export.png")
+	_dock._output_path_edit.text = output_path
+
+	var validation: Dictionary = _dock._validate_export_settings()
+	assert_bool(validation.ok).is_true()
+
+	var export_result: Dictionary = _dock._write_static_export(_create_color_image(16, 16, Color(1.0, 0.0, 0.0, 1.0)), validation.settings)
+
+	var frame_paths := SpriteSheetExporter.get_individual_frame_paths(output_path, 2)
+	assert_bool(export_result.ok).is_true()
+	assert_str(export_result.message).contains("Exported 3 PNG file(s).")
+	assert_bool(FileAccess.file_exists(output_path)).is_true()
+	assert_bool(FileAccess.file_exists(frame_paths[0])).is_true()
+	assert_bool(FileAccess.file_exists(frame_paths[1])).is_true()
+
+	var sheet := Image.load_from_file(output_path)
+	assert_object(sheet).is_not_null()
+	assert_vector(sheet.get_size()).is_equal(Vector2i(34, 16))
+
+
 func _add_mesh_instance(parent: Node, size: Vector3, position: Vector3, is_visible := true) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
 	mesh.size = size
@@ -251,3 +364,9 @@ func _save_test_scene(file_name: String) -> String:
 
 func _temp_resource_path(file_name: String) -> String:
 	return create_temp_dir("blender_sprite_sheet").path_join(file_name)
+
+
+func _create_color_image(width: int, height: int, color: Color) -> Image:
+	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
+	image.fill(color)
+	return image
