@@ -52,7 +52,7 @@ class CheckerboardBackdrop:
 
 
 func _ready() -> void:
-	name = "Sprite Sheet Renderer"
+	name = "Fake3D"
 	custom_minimum_size = Vector2(360, 520)
 	_build_ui()
 	_build_preview_scene()
