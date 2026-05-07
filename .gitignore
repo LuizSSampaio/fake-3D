@@ -1,0 +1,16 @@
+.godot/
+
+.tmp
+.DS_Store
+project.godot
+.idea/
+*.zip
+
+/.import
+/.vscode
+/default_env.tres
+/default_bus_layout.tres
+/icon.svg
+/icon.svg.import
+export_presets.cfg
+.editorconfig
