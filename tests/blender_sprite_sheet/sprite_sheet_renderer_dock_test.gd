@@ -3,6 +3,8 @@ extends GdUnitTestSuite
 
 const SpriteSheetRendererDock := preload("res://addons/blender_sprite_sheet/sprite_sheet_renderer_dock.gd")
 const SpriteSheetExporter := preload("res://addons/blender_sprite_sheet/sprite_sheet_exporter.gd")
+const SpriteSheetCapture := preload("res://addons/blender_sprite_sheet/sprite_sheet_capture.gd")
+const AnimationUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_animation_utils.gd")
 const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_frame_overlay.gd")
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
 const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
@@ -38,6 +40,13 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_bool(_dock._checkerboard.visible).is_true()
 	assert_object(_dock._export_frame_overlay).is_not_null()
 	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(256, 256))
+	assert_bool(_dock._animation_option.disabled).is_true()
+	assert_str(_dock._animation_option.get_item_text(0)).is_equal("No animations")
+	assert_bool(_dock._animation_play_button.disabled).is_true()
+	assert_str(_dock._animation_play_button.text).is_equal("Play")
+	assert_bool(_dock._animation_timeline.editable).is_false()
+	assert_str(_dock._animation_frame_label.text).is_equal("Frame 0 / 0")
+	assert_bool(_dock._avoid_duplicate_loop_frame_check.disabled).is_true()
 	assert_int(_dock._source_list.item_count).is_equal(0)
 	assert_vector(_dock._source_list.custom_minimum_size).is_equal(Vector2(0.0, 112.0))
 	assert_str(_dock._source_path_edit.placeholder_text).is_equal("Add model path...")
@@ -123,6 +132,109 @@ func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> 
 	assert_int(_dock._get_option_id(_dock._resize_filter_option, -1)).is_equal(RenderOptions.DEFAULT_RESIZE_FILTER)
 	assert_int(_dock._get_option_id(_dock._anisotropic_filtering_option, -1)).is_equal(RenderOptions.DEFAULT_ANISOTROPIC_FILTERING)
 	assert_str(_dock._export_result_label.text).is_equal("PNG export is ready after source models are loaded.")
+
+
+func test_animation_sampling_times_can_avoid_loop_endpoint() -> void:
+	var loop_times := AnimationUtils.calculate_sample_times(2.0, 4, true)
+	assert_int(loop_times.size()).is_equal(4)
+	assert_float(loop_times[0]).is_equal_approx(0.0, 0.001)
+	assert_float(loop_times[1]).is_equal_approx(0.5, 0.001)
+	assert_float(loop_times[2]).is_equal_approx(1.0, 0.001)
+	assert_float(loop_times[3]).is_equal_approx(1.5, 0.001)
+
+	var full_times := AnimationUtils.calculate_sample_times(2.0, 4, false)
+	assert_float(full_times[1]).is_equal_approx(0.666, 0.01)
+	assert_float(full_times[2]).is_equal_approx(1.333, 0.01)
+	assert_float(full_times[3]).is_equal_approx(2.0, 0.001)
+	assert_int(AnimationUtils.calculate_frame_index(1.5, 2.0, 4, true)).is_equal(3)
+
+
+func test_load_source_populates_animation_selector_and_scrubber() -> void:
+	var source_path := _save_test_animated_scene("animated_model.tscn", "Walk", 2.0, Animation.LOOP_LINEAR)
+
+	_dock._load_source(source_path)
+
+	assert_str(_dock._status_label.text).is_equal("Loaded \"animated_model.tscn\".")
+	assert_bool(_dock._animation_option.disabled).is_false()
+	assert_int(_dock._animation_option.item_count).is_equal(1)
+	assert_str(_dock._get_selected_animation_name()).is_equal("Walk")
+	assert_object(_dock._animation_player).is_not_null()
+	assert_bool(_dock._animation_player.has_animation("Walk")).is_true()
+	assert_str(str(_dock._animation_player_path)).contains("AnimationPlayer")
+	assert_bool(_dock._animation_play_button.disabled).is_false()
+	assert_str(_dock._animation_play_button.text).is_equal("Play")
+	assert_bool(_dock._animation_timeline.editable).is_true()
+	assert_float(_dock._animation_timeline.max_value).is_equal_approx(2.0, 0.001)
+	assert_bool(_dock._avoid_duplicate_loop_frame_check.disabled).is_false()
+	assert_str(_dock._animation_frame_label.text).is_equal("Frame 0 / 0")
+
+
+func test_animation_controls_seek_and_toggle_preview_playback() -> void:
+	var source_path := _save_test_animated_scene("animated_controls_model.tscn", "Run", 2.0, Animation.LOOP_LINEAR)
+	_dock._load_source(source_path)
+	_dock._frame_count_spin.set_value_no_signal(4.0)
+
+	_dock._on_animation_timeline_changed(1.0)
+
+	assert_float(_dock._animation_player.current_animation_position).is_equal_approx(1.0, 0.001)
+	assert_float(_dock._animation_timeline.value).is_equal_approx(1.0, 0.001)
+	assert_str(_dock._animation_frame_label.text).is_equal("Frame 2 / 3")
+
+	_dock._on_animation_play_pressed()
+
+	assert_bool(_dock._animation_player.is_playing()).is_true()
+	assert_bool(_dock._is_animation_playing).is_true()
+	assert_str(_dock._animation_play_button.text).is_equal("Pause")
+
+	_dock._on_animation_play_pressed()
+
+	assert_bool(_dock._animation_player.is_playing()).is_false()
+	assert_bool(_dock._is_animation_playing).is_false()
+	assert_str(_dock._animation_play_button.text).is_equal("Play")
+
+
+func test_export_validation_includes_selected_animation_and_rejects_missing_animation() -> void:
+	var source_path := _save_test_animated_scene("animated_export_model.tscn", "Attack", 1.5, Animation.LOOP_NONE)
+	_dock._load_source(source_path)
+	_dock._output_path_edit.text = _temp_resource_directory()
+
+	var validation: Dictionary = _dock._validate_export_settings()
+	assert_bool(validation.ok).is_true()
+	var loaded_validation: Dictionary = _dock._validate_export_settings_for(validation.settings, true)
+
+	assert_bool(loaded_validation.ok).is_true()
+	assert_str(loaded_validation.settings.animation_name).is_equal("Attack")
+	assert_str(str(loaded_validation.settings.animation_player_path)).contains("AnimationPlayer")
+
+	var missing_settings: Dictionary = validation.settings.duplicate()
+	missing_settings["animation_name"] = "Missing"
+	var missing_validation: Dictionary = _dock._validate_export_settings_for(missing_settings, true)
+
+	assert_bool(missing_validation.ok).is_false()
+	assert_str(missing_validation.message).is_equal("Requested animation doesn't exist: \"Missing\".")
+
+
+func test_capture_animation_sample_plan_and_seek_use_requested_frame_count() -> void:
+	var source_path := _save_test_animated_scene("animated_capture_model.tscn", "Idle", 1.0, Animation.LOOP_LINEAR)
+	_dock._load_source(source_path)
+
+	var sample_plan := SpriteSheetCapture.build_animation_sample_plan(
+		_dock._animation_player,
+		"Idle",
+		3,
+		true
+	)
+
+	assert_bool(sample_plan.ok).is_true()
+	assert_int(sample_plan.sample_times.size()).is_equal(3)
+	assert_float(sample_plan.sample_times[0]).is_equal_approx(0.0, 0.001)
+	assert_float(sample_plan.sample_times[1]).is_equal_approx(0.333, 0.01)
+	assert_float(sample_plan.sample_times[2]).is_equal_approx(0.666, 0.01)
+
+	var seek_result := AnimationUtils.seek_player(_dock._animation_player, "Idle", sample_plan.sample_times[2])
+
+	assert_bool(seek_result.ok).is_true()
+	assert_float(_dock._animation_player.current_animation_position).is_equal_approx(0.666, 0.01)
 
 
 func test_source_selection_deduplicates_and_previews_first_model() -> void:
@@ -442,6 +554,8 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	assert_float(float(profile.camera.orthographic_size)).is_equal_approx(2.5, 0.001)
 	assert_bool(bool(profile.background.transparent)).is_false()
 	assert_that(_color_from_array(profile.background.color)).is_equal(background_color)
+	assert_str(profile.animation.name).is_equal("")
+	assert_bool(bool(profile.animation.avoid_duplicate_loop_frame)).is_true()
 	assert_str(profile.material.material_path).is_equal("res://materials/book.tres")
 	assert_str(profile.material.texture_path).is_equal("res://textures/book.png")
 	assert_int(int(profile.export.frame_width)).is_equal(128)
@@ -559,6 +673,30 @@ func test_load_profile_accepts_minimal_position_rotation_definition() -> void:
 	assert_bool(result.ok).is_true()
 	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
 	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
+
+
+func test_load_profile_applies_animation_selection_after_source_loads() -> void:
+	var profile_path := _temp_resource_path("animation_profile.json")
+	_write_json_file(profile_path, {
+		"animation": {
+			"name": "Jump",
+			"avoid_duplicate_loop_frame": false,
+		},
+		"export": {
+			"frame_count": 4,
+		},
+	})
+
+	var result: Dictionary = _dock._load_profile(profile_path)
+
+	assert_bool(result.ok).is_true()
+	assert_bool(_dock._avoid_duplicate_loop_frame_check.button_pressed).is_false()
+
+	_dock._load_source(_save_test_animated_scene("profile_animation_model.tscn", "Jump", 2.0, Animation.LOOP_LINEAR))
+
+	assert_str(_dock._get_selected_animation_name()).is_equal("Jump")
+	assert_bool(_dock._avoid_duplicate_loop_frame_check.button_pressed).is_false()
+	assert_str(_dock._animation_frame_label.text).is_equal("Frame 0 / 3")
 
 
 func test_reset_object_restores_object_transform_without_moving_camera() -> void:
@@ -855,6 +993,31 @@ func _save_test_scene(file_name: String) -> String:
 	var root := Node3D.new()
 	root.name = "TestModel"
 	_add_mesh_instance(root, Vector3(2.0, 3.0, 4.0), Vector3.ZERO)
+
+	var packed_scene := PackedScene.new()
+	assert_int(packed_scene.pack(root)).is_equal(OK)
+	var scene_path := _temp_resource_path(file_name)
+	assert_int(ResourceSaver.save(packed_scene, scene_path)).is_equal(OK)
+	root.free()
+	return scene_path
+
+
+func _save_test_animated_scene(file_name: String, animation_name: String, animation_length: float, loop_mode: int) -> String:
+	var root := Node3D.new()
+	root.name = "AnimatedTestModel"
+	_add_mesh_instance(root, Vector3(2.0, 3.0, 4.0), Vector3.ZERO)
+
+	var animation_player := AnimationPlayer.new()
+	animation_player.name = "AnimationPlayer"
+	root.add_child(animation_player)
+	animation_player.owner = root
+
+	var library := AnimationLibrary.new()
+	var animation := Animation.new()
+	animation.length = animation_length
+	animation.loop_mode = loop_mode as Animation.LoopMode
+	library.add_animation(animation_name, animation)
+	animation_player.add_animation_library("", library)
 
 	var packed_scene := PackedScene.new()
 	assert_int(packed_scene.pack(root)).is_equal(OK)

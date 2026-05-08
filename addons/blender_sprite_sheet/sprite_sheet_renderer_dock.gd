@@ -15,6 +15,7 @@ const SourceSelection := preload("res://addons/blender_sprite_sheet/sprite_sheet
 const ExportPlan := preload("res://addons/blender_sprite_sheet/sprite_sheet_export_plan.gd")
 const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
+const AnimationUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_animation_utils.gd")
 
 const SUPPORTED_EXTENSIONS := SourceLoader.SUPPORTED_EXTENSIONS
 const DEFAULT_CAMERA_POSITION := Vector3(0.0, 1.5, 4.0)
@@ -71,25 +72,40 @@ var _taa_check: CheckBox
 var _supersample_option: OptionButton
 var _resize_filter_option: OptionButton
 var _anisotropic_filtering_option: OptionButton
+var _animation_option: OptionButton
+var _animation_play_button: Button
+var _animation_timeline: HSlider
+var _animation_frame_label: Label
+var _avoid_duplicate_loop_frame_check: CheckBox
 var _output_path_edit: LineEdit
 var _export_individual_frames_check: CheckBox
 var _export_button: Button
 var _export_result_label: Label
 var _loaded_source: Node
+var _animation_player: AnimationPlayer
+var _animation_player_path := NodePath()
 var _active_profile: Dictionary = {}
 var _source_paths := PackedStringArray()
 var _is_exporting := false
+var _is_animation_playing := false
+var _is_updating_animation_timeline := false
 
 
 func _ready() -> void:
 	name = "Fake3D"
 	custom_minimum_size = Vector2(360, 520)
+	set_process(true)
 	_build_ui()
 	_update_render_options()
 	_build_preview_scene()
 	_sync_camera_from_controls()
 	_update_background()
 	_update_export_frame_overlay()
+	_set_no_animation_controls()
+
+
+func _process(_delta: float) -> void:
+	_update_animation_playback_progress()
 
 
 func _exit_tree() -> void:
@@ -285,6 +301,10 @@ func _create_resource_picker_row(label_text: String, placeholder: String, browse
 
 
 func _create_preview_controls() -> Control:
+	var container := VBoxContainer.new()
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.add_theme_constant_override("separation", 6)
+
 	_preview_stack = Control.new()
 	_preview_stack.custom_minimum_size = Vector2(320, 240)
 	_preview_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -311,7 +331,57 @@ func _create_preview_controls() -> Control:
 	_export_frame_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_preview_stack.add_child(_export_frame_overlay)
 
-	return _preview_stack
+	container.add_child(_preview_stack)
+	container.add_child(_create_animation_controls())
+	return container
+
+
+func _create_animation_controls() -> Control:
+	var container := VBoxContainer.new()
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.add_theme_constant_override("separation", 4)
+
+	var selector_row := HBoxContainer.new()
+	selector_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	selector_row.add_child(ControlFactory.create_row_label("Animation"))
+
+	_animation_option = OptionButton.new()
+	_animation_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_animation_option.item_selected.connect(_on_animation_selected)
+	selector_row.add_child(_animation_option)
+
+	_animation_play_button = Button.new()
+	_animation_play_button.text = "Play"
+	_animation_play_button.tooltip_text = "Play or pause the selected animation."
+	_animation_play_button.pressed.connect(_on_animation_play_pressed)
+	selector_row.add_child(_animation_play_button)
+	container.add_child(selector_row)
+
+	var timeline_row := HBoxContainer.new()
+	timeline_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	timeline_row.add_child(ControlFactory.create_row_label("Timeline"))
+
+	_animation_timeline = HSlider.new()
+	_animation_timeline.min_value = 0.0
+	_animation_timeline.max_value = 0.0
+	_animation_timeline.step = 0.001
+	_animation_timeline.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_animation_timeline.value_changed.connect(_on_animation_timeline_changed)
+	timeline_row.add_child(_animation_timeline)
+
+	_animation_frame_label = Label.new()
+	_animation_frame_label.custom_minimum_size.x = 72.0
+	_animation_frame_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	timeline_row.add_child(_animation_frame_label)
+	container.add_child(timeline_row)
+
+	_avoid_duplicate_loop_frame_check = CheckBox.new()
+	_avoid_duplicate_loop_frame_check.text = "Avoid duplicate loop frame"
+	_avoid_duplicate_loop_frame_check.button_pressed = true
+	_avoid_duplicate_loop_frame_check.toggled.connect(_on_avoid_duplicate_loop_frame_toggled)
+	container.add_child(_avoid_duplicate_loop_frame_check)
+
+	return container
 
 
 func _create_object_controls() -> Control:
@@ -418,6 +488,7 @@ func _create_export_controls() -> Control:
 
 	_frame_count_spin = ControlFactory.create_spin_box(1.0, 10000.0, 1.0, 1.0)
 	ControlFactory.add_labeled_control(sheet_controls, "Frames", _frame_count_spin)
+	_frame_count_spin.value_changed.connect(_on_frame_count_changed)
 
 	_columns_spin = ControlFactory.create_spin_box(1.0, 10000.0, 1.0, 1.0)
 	ControlFactory.add_labeled_control(sheet_controls, "Columns", _columns_spin)
@@ -725,6 +796,7 @@ func _preview_source(path: String) -> Dictionary:
 	bounds = _calculate_model_bounds()
 	_apply_material_settings(false)
 	_frame_bounds(bounds.aabb)
+	_refresh_animation_controls()
 	if not _active_profile.is_empty():
 		_apply_profile_settings(_active_profile)
 	var message := "Loaded \"%s\"." % (load_result.path as String).get_file()
@@ -904,6 +976,7 @@ func _clear_loaded_source() -> void:
 	if is_instance_valid(_loaded_source):
 		_loaded_source.queue_free()
 	_loaded_source = null
+	_set_no_animation_controls()
 	_reset_object_transform()
 	if _model_root:
 		_model_root.position = Vector3.ZERO
@@ -1014,6 +1087,10 @@ func _collect_profile_settings() -> Dictionary:
 			"transparent": _transparent_background_check.button_pressed,
 			"color": ProfileStore.color_to_array(_background_color_picker.color),
 		},
+		"animation": {
+			"name": _get_selected_animation_name(),
+			"avoid_duplicate_loop_frame": _avoid_duplicate_loop_frame_check.button_pressed,
+		},
 		"export": {
 			"frame_width": int(round(_frame_width_spin.value)),
 			"frame_height": int(round(_frame_height_spin.value)),
@@ -1060,6 +1137,11 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		_transparent_background_check.button_pressed = bool(background_settings.get("transparent", _transparent_background_check.button_pressed))
 		_background_color_picker.color = ProfileStore.color_value(background_settings, "color", _background_color_picker.color)
 
+	var animation_settings := ProfileStore.dictionary_value(profile, "animation")
+	if not animation_settings.is_empty():
+		_avoid_duplicate_loop_frame_check.button_pressed = bool(animation_settings.get("avoid_duplicate_loop_frame", _avoid_duplicate_loop_frame_check.button_pressed))
+		_select_animation_by_name(str(animation_settings.get("name", "")))
+
 	var export_settings := ProfileStore.dictionary_value(profile, "export")
 	if not export_settings.is_empty():
 		_frame_width_spin.set_value_no_signal(float(export_settings.get("frame_width", _frame_width_spin.value)))
@@ -1084,6 +1166,7 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 	_update_background()
 	_update_render_options()
 	_update_export_frame_overlay()
+	_update_animation_frame_label()
 	_apply_material_settings(false)
 
 
@@ -1156,12 +1239,36 @@ func _on_export_dimensions_changed(_value: float) -> void:
 	_update_export_frame_overlay()
 
 
+func _on_frame_count_changed(_value: float) -> void:
+	_update_animation_frame_label()
+
+
 func _on_render_option_selected(_index: int) -> void:
 	_update_render_options()
 
 
 func _on_taa_toggled(_button_pressed: bool) -> void:
 	_update_render_options()
+
+
+func _on_animation_selected(index: int) -> void:
+	_select_animation_index(index, true)
+
+
+func _on_animation_play_pressed() -> void:
+	_set_animation_playing(not _is_animation_playing)
+
+
+func _on_animation_timeline_changed(value: float) -> void:
+	if _is_updating_animation_timeline:
+		return
+
+	_set_animation_playing(false)
+	_seek_preview_animation(value)
+
+
+func _on_avoid_duplicate_loop_frame_toggled(_button_pressed: bool) -> void:
+	_update_animation_frame_label()
 
 
 func _update_background() -> void:
@@ -1184,6 +1291,160 @@ func _update_export_frame_overlay() -> void:
 	))
 
 
+func _refresh_animation_controls() -> void:
+	var discovery := AnimationUtils.find_first_player_with_animations(_loaded_source)
+	if not discovery.ok:
+		_set_no_animation_controls()
+		return
+
+	_animation_player = discovery.player
+	_animation_player_path = _scene_root.get_path_to(_animation_player)
+	_animation_option.clear()
+	var animation_names: PackedStringArray = discovery.animations
+	for animation_name in animation_names:
+		_animation_option.add_item(animation_name)
+		_animation_option.set_item_metadata(_animation_option.item_count - 1, animation_name)
+
+	_animation_option.disabled = false
+	_animation_play_button.disabled = false
+	_animation_timeline.editable = true
+	_select_animation_index(0, false)
+
+
+func _set_no_animation_controls() -> void:
+	_set_animation_playing(false)
+	_animation_player = null
+	_animation_player_path = NodePath()
+	if _animation_option == null:
+		return
+
+	_animation_option.clear()
+	_animation_option.add_item("No animations")
+	_animation_option.set_item_metadata(0, "")
+	_animation_option.select(0)
+	_animation_option.disabled = true
+	_animation_play_button.disabled = true
+	_animation_timeline.set_value_no_signal(0.0)
+	_animation_timeline.min_value = 0.0
+	_animation_timeline.max_value = 0.0
+	_animation_timeline.editable = false
+	_avoid_duplicate_loop_frame_check.disabled = true
+	_update_animation_frame_label()
+
+
+func _select_animation_index(index: int, update_status := false) -> void:
+	if _animation_option == null or _animation_option.disabled:
+		_set_no_animation_controls()
+		return
+
+	if index < 0 or index >= _animation_option.item_count:
+		return
+
+	_animation_option.select(index)
+	var animation_name := _get_selected_animation_name()
+	var animation_length := AnimationUtils.get_animation_length(_animation_player, animation_name)
+	_animation_timeline.min_value = 0.0
+	_animation_timeline.max_value = max(animation_length, 0.0)
+	_animation_timeline.step = max(animation_length / 1000.0, 0.001)
+	_animation_timeline.set_value_no_signal(0.0)
+	_avoid_duplicate_loop_frame_check.disabled = not AnimationUtils.animation_loops(_animation_player, animation_name)
+	_set_animation_playing(false)
+	_seek_preview_animation(0.0)
+	if update_status:
+		_set_status("Selected animation \"%s\"." % animation_name, false)
+
+
+func _select_animation_by_name(animation_name: String) -> void:
+	if animation_name.is_empty() or _animation_option == null or _animation_option.disabled:
+		_update_animation_frame_label()
+		return
+
+	for index in range(_animation_option.item_count):
+		if str(_animation_option.get_item_metadata(index)) == animation_name:
+			_select_animation_index(index, false)
+			return
+
+	_update_animation_frame_label()
+
+
+func _get_selected_animation_name() -> String:
+	if _animation_option == null or _animation_option.selected < 0 or _animation_option.disabled:
+		return ""
+
+	return str(_animation_option.get_item_metadata(_animation_option.selected))
+
+
+func _has_selected_animation() -> bool:
+	return is_instance_valid(_animation_player) and not _get_selected_animation_name().is_empty()
+
+
+func _set_animation_playing(playing: bool) -> void:
+	if not _has_selected_animation():
+		_is_animation_playing = false
+		if _animation_play_button:
+			_animation_play_button.text = "Play"
+		return
+
+	var animation_name := _get_selected_animation_name()
+	_is_animation_playing = playing
+	_animation_play_button.text = "Pause" if playing else "Play"
+	if playing:
+		_animation_player.play(animation_name)
+		_animation_player.seek(float(_animation_timeline.value), true)
+	else:
+		_animation_player.pause()
+
+
+func _seek_preview_animation(animation_time: float) -> void:
+	if not _has_selected_animation():
+		_update_animation_frame_label()
+		return
+
+	var seek_result := AnimationUtils.seek_player(_animation_player, _get_selected_animation_name(), animation_time)
+	if not seek_result.ok:
+		_set_status(seek_result.message, true)
+		return
+
+	_set_timeline_value_no_signal(float(seek_result.time))
+	_update_animation_frame_label()
+
+
+func _update_animation_playback_progress() -> void:
+	if not _is_animation_playing or not _has_selected_animation():
+		return
+
+	var current_time := _animation_player.current_animation_position
+	_set_timeline_value_no_signal(current_time)
+	_update_animation_frame_label()
+	if not _animation_player.is_playing():
+		_set_animation_playing(false)
+
+
+func _set_timeline_value_no_signal(value: float) -> void:
+	if _animation_timeline == null:
+		return
+
+	_is_updating_animation_timeline = true
+	_animation_timeline.set_value_no_signal(clampf(value, _animation_timeline.min_value, _animation_timeline.max_value))
+	_is_updating_animation_timeline = false
+
+
+func _update_animation_frame_label() -> void:
+	if _animation_frame_label == null:
+		return
+
+	var frame_count := int(round(_frame_count_spin.value)) if _frame_count_spin != null else 0
+	if not _has_selected_animation() or frame_count <= 0:
+		_animation_frame_label.text = "Frame 0 / 0"
+		return
+
+	var animation_name := _get_selected_animation_name()
+	var animation_length := AnimationUtils.get_animation_length(_animation_player, animation_name)
+	var avoid_endpoint := _avoid_duplicate_loop_frame_check.button_pressed and AnimationUtils.animation_loops(_animation_player, animation_name)
+	var frame_index := AnimationUtils.calculate_frame_index(float(_animation_timeline.value), animation_length, frame_count, avoid_endpoint)
+	_animation_frame_label.text = "Frame %d / %d" % [frame_index, max(frame_count - 1, 0)]
+
+
 func _collect_export_settings() -> Dictionary:
 	return {
 		"frame_width": int(round(_frame_width_spin.value)),
@@ -1199,6 +1460,8 @@ func _collect_export_settings() -> Dictionary:
 		"anisotropic_filtering": _get_option_id(_anisotropic_filtering_option, RenderOptions.DEFAULT_ANISOTROPIC_FILTERING),
 		"transparent_background": _transparent_background_check.button_pressed,
 		"background_color": _background_color_picker.color,
+		"animation_name": _get_selected_animation_name(),
+		"avoid_duplicate_loop_frame": _avoid_duplicate_loop_frame_check.button_pressed,
 		"output_directory": _output_path_edit.text.strip_edges(),
 		"output_format": "png",
 		"export_individual_frames": _export_individual_frames_check.button_pressed,
@@ -1275,6 +1538,18 @@ func _validate_export_settings_for(settings: Dictionary, has_loaded_source: bool
 			"message": "No visible mesh found in source asset before export.",
 		}
 
+	var normalized_settings: Dictionary = validation.settings
+	var animation_name := str(normalized_settings.get("animation_name", "")).strip_edges()
+	if not animation_name.is_empty():
+		if not _has_selected_animation() or not is_instance_valid(_animation_player) or not _animation_player.has_animation(animation_name):
+			return {
+				"ok": false,
+				"message": "Requested animation doesn't exist: \"%s\"." % animation_name,
+			}
+
+		normalized_settings["animation_player_path"] = _animation_player_path
+
+	validation["settings"] = normalized_settings
 	return validation
 
 
@@ -1313,12 +1588,32 @@ func _export_sprite_sheets() -> void:
 		_update_render_options()
 
 		var frame_size := Vector2i(int(settings["frame_width"]), int(settings["frame_height"]))
-		var capture_result: Dictionary = await Capture.capture_scene(_scene_root, frame_size, bool(settings["transparent_background"]), settings)
-		if not capture_result.ok:
-			_finish_export("Export failed for \"%s\": %s" % [source_name, capture_result.message], true)
-			return
+		var capture_result: Dictionary
+		var export_result: Dictionary
+		if _settings_use_animation(settings):
+			capture_result = await Capture.capture_animation_frames(
+				_scene_root,
+				frame_size,
+				bool(settings["transparent_background"]),
+				NodePath(str(settings["animation_player_path"])),
+				str(settings["animation_name"]),
+				int(settings["frame_count"]),
+				bool(settings.get("avoid_duplicate_loop_frame", true)),
+				settings
+			)
+			if not capture_result.ok:
+				_finish_export("Export failed for \"%s\": %s" % [source_name, capture_result.message], true)
+				return
 
-		var export_result := _write_static_export(capture_result.image, settings)
+			export_result = _write_animation_export(capture_result.frames, settings)
+		else:
+			capture_result = await Capture.capture_scene(_scene_root, frame_size, bool(settings["transparent_background"]), settings)
+			if not capture_result.ok:
+				_finish_export("Export failed for \"%s\": %s" % [source_name, capture_result.message], true)
+				return
+
+			export_result = _write_static_export(capture_result.image, settings)
+
 		if not export_result.ok:
 			_finish_export("Export failed for \"%s\": %s" % [source_name, export_result.message], true)
 			return
@@ -1342,6 +1637,10 @@ func _load_source_for_export(source_path: String, export_scene_settings: Diction
 	return load_result
 
 
+func _settings_use_animation(settings: Dictionary) -> bool:
+	return not str(settings.get("animation_name", "")).strip_edges().is_empty()
+
+
 func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictionary:
 	if captured_frame == null or captured_frame.is_empty():
 		return {
@@ -1356,6 +1655,10 @@ func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictio
 		int(settings["frame_height"]),
 		RenderOptions.get_resize_filter(settings)
 	)
+	return Exporter.export_pngs(frames, settings)
+
+
+func _write_animation_export(frames: Array[Image], settings: Dictionary) -> Dictionary:
 	return Exporter.export_pngs(frames, settings)
 
 
