@@ -22,11 +22,9 @@ static func build(base_settings: Dictionary, source_paths: PackedStringArray, na
 	var output_paths := {}
 	for index in range(source_paths.size()):
 		var source_path := source_paths[index]
-		if not SourceLoader.is_supported_source_path(source_path):
-			return _failure("Unsupported source path \"%s\". Choose .tscn, .scn, .glb, .gltf, .obj, .fbx, or .blend." % source_path)
-
-		if not ResourceLoader.exists(source_path):
-			return _failure("Source asset doesn't exist: \"%s\"." % source_path)
+		var source_validation := SourceLoader.load_source_resource(source_path)
+		if not source_validation.ok:
+			return source_validation
 
 		var item_settings := _settings_for_source(
 			normalized_settings,

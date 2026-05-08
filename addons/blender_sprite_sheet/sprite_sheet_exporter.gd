@@ -70,6 +70,7 @@ static func _validate_common_settings(settings: Dictionary, has_loaded_source: b
 	var frame_count := int(settings.get("frame_count", 0))
 	var columns := int(settings.get("columns", 0))
 	var frame_spacing := int(settings.get("frame_spacing", 0))
+	var turntable_degrees := float(settings.get("turntable_degrees", 360.0))
 
 	if frame_width <= 0 or frame_height <= 0:
 		return _failure("Output frame width and height must be greater than zero.")
@@ -83,6 +84,9 @@ static func _validate_common_settings(settings: Dictionary, has_loaded_source: b
 	if frame_spacing < 0:
 		return _failure("Frame spacing can't be negative.")
 
+	if not is_finite(turntable_degrees):
+		return _failure("Turntable degrees must be a finite number.")
+
 	var output_format := normalize_output_format(settings.get("output_format", DEFAULT_OUTPUT_FORMAT))
 	if output_format.is_empty():
 		return _failure("Unsupported export format: \"%s\"." % str(settings.get("output_format", "")).strip_edges())
@@ -93,6 +97,8 @@ static func _validate_common_settings(settings: Dictionary, has_loaded_source: b
 	normalized_settings["frame_count"] = frame_count
 	normalized_settings["columns"] = columns
 	normalized_settings["frame_spacing"] = frame_spacing
+	normalized_settings["turntable_enabled"] = bool(settings.get("turntable_enabled", false))
+	normalized_settings["turntable_degrees"] = turntable_degrees
 	normalized_settings["output_format"] = output_format
 	normalized_settings = RenderOptions.normalize(normalized_settings)
 
@@ -430,6 +436,9 @@ static func build_metadata(frame_count: int, settings: Dictionary, layout := {})
 		"sheet_width": Vector2i(resolved_layout["sheet_size"]).x,
 		"sheet_height": Vector2i(resolved_layout["sheet_size"]).y,
 		"transparent_background": bool(settings.get("transparent_background", true)),
+		"lighting_preset": str(settings.get("lighting_preset", "")),
+		"turntable_enabled": bool(settings.get("turntable_enabled", false)),
+		"turntable_degrees": float(settings.get("turntable_degrees", 360.0)),
 		"frames": frames,
 	}
 

@@ -9,6 +9,9 @@ const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_fr
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
 const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
 const ProfileStore := preload("res://addons/blender_sprite_sheet/sprite_sheet_profile_store.gd")
+const PreviewScene := preload("res://addons/blender_sprite_sheet/sprite_sheet_preview_scene.gd")
+const SourceLoader := preload("res://addons/blender_sprite_sheet/sprite_sheet_source_loader.gd")
+const CameraController := preload("res://addons/blender_sprite_sheet/sprite_sheet_camera_controller.gd")
 const VECTOR_EPSILON := Vector3(0.001, 0.001, 0.001)
 
 var _dock: VBoxContainer
@@ -61,6 +64,10 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_bool(_dock._export_sprite_frames_check.button_pressed).is_false()
 	assert_bool(_dock._overwrite_existing_check.button_pressed).is_true()
 	assert_bool(_dock._background_color_picker.disabled).is_true()
+	assert_str(_dock._get_selected_lighting_preset()).is_equal(PreviewScene.DEFAULT_LIGHTING_PRESET)
+	assert_bool(_dock._turntable_enabled_check.button_pressed).is_false()
+	assert_float(float(_dock._turntable_degrees_spin.value)).is_equal_approx(360.0, 0.001)
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._turntable_degrees_spin)).is_true()
 	assert_object(_dock._object_root).is_not_null()
 	assert_vector(_dock._object_root.position).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_POSITION)
 	assert_vector(_dock._object_root.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_ROTATION)
@@ -218,6 +225,13 @@ func test_export_validation_includes_selected_animation_and_rejects_missing_anim
 	assert_bool(missing_validation.ok).is_false()
 	assert_str(missing_validation.message).is_equal("Requested animation doesn't exist: \"Missing\".")
 
+	var turntable_settings: Dictionary = validation.settings.duplicate()
+	turntable_settings["turntable_enabled"] = true
+	var turntable_validation: Dictionary = _dock._validate_export_settings_for(turntable_settings, true)
+
+	assert_bool(turntable_validation.ok).is_false()
+	assert_str(turntable_validation.message).is_equal("Turntable rendering is only available for static model exports.")
+
 
 func test_capture_animation_sample_plan_and_seek_use_requested_frame_count() -> void:
 	var source_path := _save_test_animated_scene("animated_capture_model.tscn", "Idle", 1.0, Animation.LOOP_LINEAR)
@@ -240,6 +254,19 @@ func test_capture_animation_sample_plan_and_seek_use_requested_frame_count() -> 
 
 	assert_bool(seek_result.ok).is_true()
 	assert_float(_dock._animation_player.current_animation_position).is_equal_approx(0.666, 0.01)
+
+
+func test_capture_scene_honors_cancel_callback() -> void:
+	var result := await SpriteSheetCapture.capture_scene(
+		_dock._scene_root,
+		Vector2i(4, 4),
+		true,
+		{},
+		Callable(self, "_always_cancel")
+	)
+
+	assert_bool(result.ok).is_false()
+	assert_str(result.message).is_equal(SpriteSheetCapture.CANCELLED_MESSAGE)
 
 
 func test_source_selection_deduplicates_and_previews_first_model() -> void:
@@ -427,6 +454,24 @@ func test_render_quality_controls_update_preview_and_export_settings() -> void:
 	assert_int(settings.anisotropic_filtering).is_equal(Viewport.ANISOTROPY_16X)
 
 
+func test_turntable_controls_update_export_settings_and_angles() -> void:
+	_dock._turntable_enabled_check.button_pressed = true
+	_dock._on_turntable_toggled(true)
+	_dock._turntable_degrees_spin.set_value_no_signal(180.0)
+	_dock._frame_count_spin.set_value_no_signal(4.0)
+
+	var settings: Dictionary = _dock._collect_export_settings()
+	var angles := SpriteSheetCapture.build_turntable_angles(4, settings.turntable_degrees)
+
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._turntable_degrees_spin)).is_false()
+	assert_bool(settings.turntable_enabled).is_true()
+	assert_float(float(settings.turntable_degrees)).is_equal_approx(180.0, 0.001)
+	assert_int(angles.size()).is_equal(4)
+	assert_float(angles[0]).is_equal_approx(0.0, 0.001)
+	assert_float(angles[1]).is_equal_approx(45.0, 0.001)
+	assert_float(angles[3]).is_equal_approx(135.0, 0.001)
+
+
 func test_output_format_control_updates_export_settings() -> void:
 	assert_int(_dock._output_format_option.item_count).is_equal(SpriteSheetExporter.get_output_format_options().size())
 
@@ -493,6 +538,24 @@ func test_background_controls_switch_transparency_and_color() -> void:
 	assert_bool(_dock._background_color_picker.disabled).is_true()
 
 
+func test_lighting_preset_control_updates_preview_lights() -> void:
+	_dock._select_lighting_preset("dramatic")
+	_dock._update_lighting()
+
+	var key_light := _dock._scene_root.get_node("KeyLight") as DirectionalLight3D
+	var fill_light := _dock._scene_root.get_node("FillLight") as DirectionalLight3D
+
+	assert_str(_dock._get_selected_lighting_preset()).is_equal("dramatic")
+	assert_float(key_light.light_energy).is_equal_approx(3.0, 0.001)
+	assert_float(fill_light.light_energy).is_equal_approx(0.15, 0.001)
+	assert_float(_dock._world_environment.environment.ambient_light_energy).is_equal_approx(0.12, 0.001)
+
+	_dock._select_lighting_preset("unknown")
+	_dock._update_lighting()
+
+	assert_str(_dock._get_selected_lighting_preset()).is_equal(PreviewScene.DEFAULT_LIGHTING_PRESET)
+
+
 func test_projection_selection_syncs_camera_and_editable_controls() -> void:
 	_dock._camera_projection_option.select(1)
 	_dock._on_projection_selected(1)
@@ -555,6 +618,7 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	_dock._apply_material_settings()
 	_dock._transparent_background_check.button_pressed = false
 	_dock._background_color_picker.color = background_color
+	_dock._select_lighting_preset("soft")
 	_dock._source_path_edit.text = second_source_path
 	_dock._material_path_edit.text = "res://materials/companion.tres"
 	_dock._texture_path_edit.text = "res://textures/companion.png"
@@ -572,6 +636,8 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	_dock._frame_count_spin.set_value_no_signal(8.0)
 	_dock._columns_spin.set_value_no_signal(4.0)
 	_dock._frame_spacing_spin.set_value_no_signal(2.0)
+	_dock._turntable_enabled_check.button_pressed = true
+	_dock._turntable_degrees_spin.set_value_no_signal(180.0)
 	_select_option_by_id(_dock._msaa_option, Viewport.MSAA_8X)
 	_select_option_by_id(_dock._screen_space_aa_option, Viewport.SCREEN_SPACE_AA_FXAA)
 	_dock._taa_check.button_pressed = true
@@ -617,6 +683,7 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	assert_float(float(profile.settings.camera.orthographic_size)).is_equal_approx(2.5, 0.001)
 	assert_bool(bool(profile.settings.background.transparent)).is_false()
 	assert_that(_color_from_array(profile.settings.background.color)).is_equal(background_color)
+	assert_str(profile.settings.lighting.preset).is_equal("soft")
 	assert_str(profile.settings.animation.name).is_equal("")
 	assert_bool(bool(profile.settings.animation.avoid_duplicate_loop_frame)).is_true()
 	assert_str(profile.settings.material.material_path).is_equal("res://materials/companion.tres")
@@ -626,6 +693,8 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	assert_int(int(profile.export.frame_count)).is_equal(8)
 	assert_int(int(profile.export.columns)).is_equal(4)
 	assert_int(int(profile.export.frame_spacing)).is_equal(2)
+	assert_bool(bool(profile.export.turntable_enabled)).is_true()
+	assert_float(float(profile.export.turntable_degrees)).is_equal_approx(180.0, 0.001)
 	assert_int(int(profile.export.msaa_3d)).is_equal(Viewport.MSAA_8X)
 	assert_int(int(profile.export.screen_space_aa)).is_equal(Viewport.SCREEN_SPACE_AA_FXAA)
 	assert_bool(bool(profile.export.use_taa)).is_true()
@@ -684,6 +753,9 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 				"transparent": false,
 				"color": [background_color.r, background_color.g, background_color.b, background_color.a],
 			},
+			"lighting": {
+				"preset": "dramatic",
+			},
 			"animation": {
 				"name": "",
 				"avoid_duplicate_loop_frame": true,
@@ -695,6 +767,8 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 			"frame_count": 6,
 			"columns": 3,
 			"frame_spacing": 4,
+			"turntable_enabled": true,
+			"turntable_degrees": 270.0,
 			"msaa_3d": Viewport.MSAA_8X,
 			"screen_space_aa": Viewport.SCREEN_SPACE_AA_FXAA,
 			"use_taa": true,
@@ -724,6 +798,8 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	assert_bool(_dock._viewport.transparent_bg).is_false()
 	assert_bool(_dock._background_color_picker.disabled).is_false()
 	assert_that(_dock._world_environment.environment.background_color).is_equal(background_color)
+	assert_str(_dock._get_selected_lighting_preset()).is_equal("dramatic")
+	assert_float((_dock._scene_root.get_node("KeyLight") as DirectionalLight3D).light_energy).is_equal_approx(3.0, 0.001)
 	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(320, 160))
 	assert_str(_dock._models_folder_edit.text).is_equal(models_dir)
 	assert_bool(_dock._models_recursive_check.button_pressed).is_true()
@@ -739,6 +815,9 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	assert_int(int(_dock._frame_count_spin.value)).is_equal(6)
 	assert_int(int(_dock._columns_spin.value)).is_equal(3)
 	assert_int(int(_dock._frame_spacing_spin.value)).is_equal(4)
+	assert_bool(_dock._turntable_enabled_check.button_pressed).is_true()
+	assert_float(float(_dock._turntable_degrees_spin.value)).is_equal_approx(270.0, 0.001)
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._turntable_degrees_spin)).is_false()
 	assert_int(_dock._get_option_id(_dock._msaa_option, -1)).is_equal(Viewport.MSAA_8X)
 	assert_int(_dock._get_option_id(_dock._screen_space_aa_option, -1)).is_equal(Viewport.SCREEN_SPACE_AA_FXAA)
 	assert_bool(_dock._taa_check.button_pressed).is_true()
@@ -902,6 +981,16 @@ func test_frame_model_resets_object_and_updates_framing_size() -> void:
 	assert_vector(_dock._object_root.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_ROTATION)
 	assert_float(_dock._camera_orthographic_size_spin.value).is_not_equal(9.0)
 	assert_str(_dock._status_label.text).is_equal("Object framed in fixed camera view.")
+
+
+func test_auto_framing_accounts_for_export_aspect_ratio() -> void:
+	var bounds := AABB(Vector3.ZERO, Vector3(8.0, 2.0, 1.0))
+
+	var square_size := CameraController.calculate_orthographic_size(bounds, Vector2i(256, 256), 1.0)
+	var wide_size := CameraController.calculate_orthographic_size(bounds, Vector2i(512, 256), 1.0)
+
+	assert_float(square_size).is_equal_approx(8.0, 0.001)
+	assert_float(wide_size).is_equal_approx(4.0, 0.001)
 
 
 func test_export_validation_reports_missing_source_and_invalid_output_settings() -> void:
@@ -1108,6 +1197,9 @@ func test_exporter_writes_metadata_json_and_sprite_frames_resource() -> void:
 		"frame_spacing": 1,
 		"output_path": output_path,
 		"output_format": "png",
+		"lighting_preset": "soft",
+		"turntable_enabled": true,
+		"turntable_degrees": 270.0,
 		"export_metadata": true,
 		"export_sprite_frames": true,
 	}
@@ -1132,6 +1224,9 @@ func test_exporter_writes_metadata_json_and_sprite_frames_resource() -> void:
 	assert_int(int(metadata.rows)).is_equal(2)
 	assert_int(int(metadata.sheet_width)).is_equal(9)
 	assert_int(int(metadata.sheet_height)).is_equal(9)
+	assert_str(metadata.lighting_preset).is_equal("soft")
+	assert_bool(bool(metadata.turntable_enabled)).is_true()
+	assert_float(float(metadata.turntable_degrees)).is_equal_approx(270.0, 0.001)
 	assert_int(metadata.frames.size()).is_equal(3)
 	assert_int(int(metadata.frames[1].x)).is_equal(5)
 	assert_int(int(metadata.frames[2].y)).is_equal(5)
@@ -1246,6 +1341,42 @@ func test_export_source_reload_preserves_current_object_transform_snapshot() -> 
 	assert_bool(result.ok).is_true()
 	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
 	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
+
+
+func test_export_button_requests_cancel_while_exporting_and_finish_restores_state() -> void:
+	_dock._is_exporting = true
+	_dock._export_button.text = "Cancel Export"
+
+	_dock._on_export_pressed()
+
+	assert_bool(_dock._is_export_cancel_requested()).is_true()
+	assert_str(_dock._export_result_label.text).is_equal("Cancelling export...")
+
+	_dock._finish_export(SpriteSheetCapture.CANCELLED_MESSAGE, false)
+
+	assert_bool(_dock._is_exporting).is_false()
+	assert_bool(_dock._is_export_cancel_requested()).is_false()
+	assert_str(_dock._export_button.text).is_equal("Export Sprite Sheet")
+	assert_bool(_dock._export_button.disabled).is_false()
+	assert_str(_dock._export_result_label.text).is_equal(SpriteSheetCapture.CANCELLED_MESSAGE)
+
+
+func test_source_validation_reports_non_3d_resources_before_export() -> void:
+	var material := StandardMaterial3D.new()
+	var material_path := _temp_resource_path("not_a_model.tres")
+	assert_int(ResourceSaver.save(material, material_path)).is_equal(OK)
+
+	var source_result := SourceLoader.load_source(material_path)
+
+	assert_bool(source_result.ok).is_false()
+	assert_str(source_result.message).contains("Unsupported source type")
+
+	var fake_scene_path := material_path.get_basename() + ".tscn"
+	_write_text_file(fake_scene_path, _read_text_file(material_path))
+	var resource_result := SourceLoader.load_source(fake_scene_path)
+
+	assert_bool(resource_result.ok).is_false()
+	assert_str(resource_result.message).contains("isn't 3D content")
 
 
 func _add_mesh_instance(parent: Node, size: Vector3, position: Vector3, is_visible := true) -> MeshInstance3D:
@@ -1398,6 +1529,14 @@ func _read_json_file(path: String) -> Dictionary:
 	return json.data
 
 
+func _read_text_file(path: String) -> String:
+	var file := FileAccess.open(path, FileAccess.READ)
+	assert_object(file).is_not_null()
+	var text := file.get_as_text()
+	file.close()
+	return text
+
+
 func _vector3_from_array(values: Array) -> Vector3:
 	return Vector3(float(values[0]), float(values[1]), float(values[2]))
 
@@ -1410,3 +1549,7 @@ func _create_color_image(width: int, height: int, color: Color) -> Image:
 	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
 	image.fill(color)
 	return image
+
+
+func _always_cancel() -> bool:
+	return true

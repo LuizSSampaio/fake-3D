@@ -7,6 +7,25 @@ const UNSUPPORTED_SOURCE_MESSAGE := "Unsupported source type. Choose .tscn, .scn
 
 static func load_source(path: String) -> Dictionary:
 	var source_path := path.strip_edges()
+	var resource_result := load_source_resource(source_path)
+	if not resource_result.ok:
+		return resource_result
+
+	var instance := instantiate_resource(resource_result.resource)
+	if instance == null:
+		return _failure("Source asset isn't 3D content Godot can instantiate: \"%s\" (%s)." % [
+			source_path,
+			resource_result.resource.get_class(),
+		])
+
+	return {
+		"ok": true,
+		"instance": instance,
+		"path": source_path,
+	}
+
+
+static func load_source_resource(source_path: String) -> Dictionary:
 	if source_path.is_empty():
 		return _failure("Choose a source asset before reloading.")
 
@@ -18,15 +37,19 @@ static func load_source(path: String) -> Dictionary:
 
 	var resource := ResourceLoader.load(source_path)
 	if resource == null:
-		return _failure("Godot couldn't load the source asset: \"%s\"." % source_path)
+		return _failure("Godot couldn't import or load the source asset: \"%s\". Check the import log and reimport the file." % source_path)
 
-	var instance := instantiate_resource(resource)
-	if instance == null:
-		return _failure("Source asset can't be instantiated as 3D content: \"%s\"." % source_path)
+	var validation_instance := instantiate_resource(resource)
+	if validation_instance == null:
+		return _failure("Source asset isn't 3D content Godot can instantiate: \"%s\" (%s)." % [
+			source_path,
+			resource.get_class(),
+		])
+	validation_instance.free()
 
 	return {
 		"ok": true,
-		"instance": instance,
+		"resource": resource,
 		"path": source_path,
 	}
 

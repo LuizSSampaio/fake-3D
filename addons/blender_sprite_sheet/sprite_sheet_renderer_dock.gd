@@ -59,6 +59,7 @@ var _camera: Camera3D
 var _world_environment: WorldEnvironment
 var _transparent_background_check: CheckBox
 var _background_color_picker: ColorPickerButton
+var _lighting_preset_option: OptionButton
 var _object_position_controls: Array[Range] = []
 var _object_rotation_controls: Array[Range] = []
 var _camera_fov_spin: Range
@@ -69,6 +70,8 @@ var _frame_height_spin: Range
 var _frame_count_spin: Range
 var _columns_spin: Range
 var _frame_spacing_spin: Range
+var _turntable_enabled_check: CheckBox
+var _turntable_degrees_spin: Range
 var _msaa_option: OptionButton
 var _screen_space_aa_option: OptionButton
 var _taa_check: CheckBox
@@ -95,6 +98,7 @@ var _active_profile: Dictionary = {}
 var _model_entries: Array[Dictionary] = []
 var _source_paths := PackedStringArray()
 var _is_exporting := false
+var _cancel_export_requested := false
 var _is_animation_playing := false
 var _is_updating_animation_timeline := false
 
@@ -108,6 +112,8 @@ func _ready() -> void:
 	_build_preview_scene()
 	_sync_camera_from_controls()
 	_update_background()
+	_update_lighting()
+	_update_turntable_controls()
 	_update_export_frame_overlay()
 	_set_no_animation_controls()
 
@@ -504,6 +510,10 @@ func _create_background_controls() -> Control:
 	_background_color_picker.color_changed.connect(_on_background_color_changed)
 	ControlFactory.add_labeled_control(container, "Color", _background_color_picker)
 
+	_lighting_preset_option = _create_lighting_preset_option()
+	_lighting_preset_option.item_selected.connect(_on_lighting_preset_selected)
+	ControlFactory.add_labeled_control(container, "Lighting", _lighting_preset_option)
+
 	return container
 
 
@@ -530,6 +540,15 @@ func _create_export_controls() -> Control:
 
 	_frame_spacing_spin = ControlFactory.create_spin_box(0.0, 1024.0, 1.0, 0.0)
 	ControlFactory.add_labeled_control(sheet_controls, "Spacing", _frame_spacing_spin)
+
+	_turntable_enabled_check = CheckBox.new()
+	_turntable_enabled_check.text = "Turntable static model"
+	_turntable_enabled_check.tooltip_text = "Rotate static models around the vertical axis across exported frames."
+	_turntable_enabled_check.toggled.connect(_on_turntable_toggled)
+	sheet_controls.add_child(_turntable_enabled_check)
+
+	_turntable_degrees_spin = ControlFactory.create_spin_box(-3600.0, 3600.0, 1.0, 360.0)
+	ControlFactory.add_labeled_control(sheet_controls, "Turntable Degrees", _turntable_degrees_spin)
 	_add_collapsible_section(container, "Sprite Sheet", sheet_controls, false, true)
 
 	var quality_controls := VBoxContainer.new()
@@ -628,6 +647,20 @@ func _create_output_format_option() -> OptionButton:
 
 	_select_output_format(Exporter.DEFAULT_OUTPUT_FORMAT, option_button)
 	option_button.item_selected.connect(_on_output_format_selected)
+	return option_button
+
+
+func _create_lighting_preset_option() -> OptionButton:
+	var option_button := OptionButton.new()
+	for option in PreviewScene.get_lighting_preset_options():
+		option_button.add_item(str(option["label"]))
+		option_button.set_item_metadata(option_button.item_count - 1, str(option["key"]))
+
+	for index in range(option_button.item_count):
+		if PreviewScene.normalize_lighting_preset(option_button.get_item_metadata(index)) == PreviewScene.DEFAULT_LIGHTING_PRESET:
+			option_button.select(index)
+			break
+
 	return option_button
 
 
@@ -846,6 +879,7 @@ func _on_save_profile_pressed() -> void:
 
 func _on_export_pressed() -> void:
 	if _is_exporting:
+		_request_export_cancel()
 		return
 
 	await _export_sprite_sheets()
@@ -1329,6 +1363,9 @@ func _collect_scene_settings() -> Dictionary:
 			"transparent": _transparent_background_check.button_pressed,
 			"color": ProfileStore.color_to_array(_background_color_picker.color),
 		},
+		"lighting": {
+			"preset": _get_selected_lighting_preset(),
+		},
 		"animation": {
 			"name": _get_selected_animation_name(),
 			"avoid_duplicate_loop_frame": _avoid_duplicate_loop_frame_check.button_pressed,
@@ -1392,6 +1429,14 @@ func _apply_scene_settings(profile: Dictionary) -> void:
 		_transparent_background_check.button_pressed = bool(background_settings.get("transparent", _transparent_background_check.button_pressed))
 		_background_color_picker.color = ProfileStore.color_value(background_settings, "color", _background_color_picker.color)
 
+	var lighting_settings := ProfileStore.dictionary_value(settings_section, "lighting")
+	if lighting_settings.is_empty():
+		lighting_settings = ProfileStore.dictionary_value(profile, "lighting")
+	if not lighting_settings.is_empty():
+		_select_lighting_preset(lighting_settings.get("preset", _get_selected_lighting_preset()))
+	elif settings_section.has("lighting_preset") or profile.has("lighting_preset"):
+		_select_lighting_preset(settings_section.get("lighting_preset", profile.get("lighting_preset", _get_selected_lighting_preset())))
+
 	var animation_settings := ProfileStore.dictionary_value(settings_section, "animation")
 	if animation_settings.is_empty():
 		animation_settings = ProfileStore.dictionary_value(profile, "animation")
@@ -1406,6 +1451,8 @@ func _apply_scene_settings(profile: Dictionary) -> void:
 		_frame_count_spin.set_value_no_signal(float(export_settings.get("frame_count", _frame_count_spin.value)))
 		_columns_spin.set_value_no_signal(float(export_settings.get("columns", _columns_spin.value)))
 		_frame_spacing_spin.set_value_no_signal(float(export_settings.get("frame_spacing", _frame_spacing_spin.value)))
+		_turntable_enabled_check.button_pressed = bool(export_settings.get("turntable_enabled", _turntable_enabled_check.button_pressed))
+		_turntable_degrees_spin.set_value_no_signal(float(export_settings.get("turntable_degrees", _turntable_degrees_spin.value)))
 		var render_settings := RenderOptions.normalize(export_settings)
 		ControlFactory.select_option_by_id(_msaa_option, int(render_settings["msaa_3d"]))
 		ControlFactory.select_option_by_id(_screen_space_aa_option, int(render_settings["screen_space_aa"]))
@@ -1429,6 +1476,8 @@ func _apply_scene_settings(profile: Dictionary) -> void:
 	_sync_object_from_controls()
 	_sync_camera_from_controls()
 	_update_background()
+	_update_lighting()
+	_update_turntable_controls()
 	_update_render_options()
 	_update_export_frame_overlay()
 	_update_animation_frame_label()
@@ -1481,6 +1530,14 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		_transparent_background_check.button_pressed = bool(background_settings.get("transparent", _transparent_background_check.button_pressed))
 		_background_color_picker.color = ProfileStore.color_value(background_settings, "color", _background_color_picker.color)
 
+	var lighting_settings := ProfileStore.dictionary_value(settings_section, "lighting")
+	if lighting_settings.is_empty():
+		lighting_settings = ProfileStore.dictionary_value(profile, "lighting")
+	if not lighting_settings.is_empty():
+		_select_lighting_preset(lighting_settings.get("preset", _get_selected_lighting_preset()))
+	elif settings_section.has("lighting_preset") or profile.has("lighting_preset"):
+		_select_lighting_preset(settings_section.get("lighting_preset", profile.get("lighting_preset", _get_selected_lighting_preset())))
+
 	var animation_settings := ProfileStore.dictionary_value(settings_section, "animation")
 	if animation_settings.is_empty():
 		animation_settings = ProfileStore.dictionary_value(profile, "animation")
@@ -1495,6 +1552,8 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		_frame_count_spin.set_value_no_signal(float(export_settings.get("frame_count", _frame_count_spin.value)))
 		_columns_spin.set_value_no_signal(float(export_settings.get("columns", _columns_spin.value)))
 		_frame_spacing_spin.set_value_no_signal(float(export_settings.get("frame_spacing", _frame_spacing_spin.value)))
+		_turntable_enabled_check.button_pressed = bool(export_settings.get("turntable_enabled", _turntable_enabled_check.button_pressed))
+		_turntable_degrees_spin.set_value_no_signal(float(export_settings.get("turntable_degrees", _turntable_degrees_spin.value)))
 		var render_settings := RenderOptions.normalize(export_settings)
 		ControlFactory.select_option_by_id(_msaa_option, int(render_settings["msaa_3d"]))
 		ControlFactory.select_option_by_id(_screen_space_aa_option, int(render_settings["screen_space_aa"]))
@@ -1518,6 +1577,8 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 	_sync_object_from_controls()
 	_sync_camera_from_controls()
 	_update_background()
+	_update_lighting()
+	_update_turntable_controls()
 	_update_render_options()
 	_update_export_frame_overlay()
 	_update_animation_frame_label()
@@ -1560,7 +1621,8 @@ func _frame_bounds(bounds: AABB) -> void:
 		bounds,
 		PREVIEW_MARGIN,
 		DEFAULT_CAMERA_POSITION,
-		DEFAULT_CAMERA_ROTATION
+		DEFAULT_CAMERA_ROTATION,
+		Vector2i(int(round(_frame_width_spin.value)), int(round(_frame_height_spin.value)))
 	)
 
 
@@ -1607,12 +1669,20 @@ func _on_background_color_changed(_color: Color) -> void:
 	_update_background()
 
 
+func _on_lighting_preset_selected(_index: int) -> void:
+	_update_lighting()
+
+
 func _on_export_dimensions_changed(_value: float) -> void:
 	_update_export_frame_overlay()
 
 
 func _on_frame_count_changed(_value: float) -> void:
 	_update_animation_frame_label()
+
+
+func _on_turntable_toggled(_button_pressed: bool) -> void:
+	_update_turntable_controls()
 
 
 func _on_render_option_selected(_index: int) -> void:
@@ -1651,6 +1721,17 @@ func _update_background() -> void:
 
 	if _world_environment and _world_environment.environment:
 		_world_environment.environment.background_color = _background_color_picker.color
+
+
+func _update_lighting() -> void:
+	PreviewScene.apply_lighting_preset(_scene_root, _get_selected_lighting_preset())
+
+
+func _update_turntable_controls() -> void:
+	if _turntable_degrees_spin == null or _turntable_enabled_check == null:
+		return
+
+	ControlFactory.set_numeric_read_only(_turntable_degrees_spin, not _turntable_enabled_check.button_pressed)
 
 
 func _update_export_frame_overlay() -> void:
@@ -1824,6 +1905,8 @@ func _collect_export_settings() -> Dictionary:
 		"frame_count": int(round(_frame_count_spin.value)),
 		"columns": int(round(_columns_spin.value)),
 		"frame_spacing": int(round(_frame_spacing_spin.value)),
+		"turntable_enabled": _turntable_enabled_check.button_pressed,
+		"turntable_degrees": float(_turntable_degrees_spin.value),
 		"msaa_3d": _get_option_id(_msaa_option, RenderOptions.DEFAULT_MSAA_3D),
 		"screen_space_aa": _get_option_id(_screen_space_aa_option, RenderOptions.DEFAULT_SCREEN_SPACE_AA),
 		"use_taa": _taa_check.button_pressed,
@@ -1832,6 +1915,7 @@ func _collect_export_settings() -> Dictionary:
 		"anisotropic_filtering": _get_option_id(_anisotropic_filtering_option, RenderOptions.DEFAULT_ANISOTROPIC_FILTERING),
 		"transparent_background": _transparent_background_check.button_pressed,
 		"background_color": _background_color_picker.color,
+		"lighting_preset": _get_selected_lighting_preset(),
 		"animation_name": _get_selected_animation_name(),
 		"avoid_duplicate_loop_frame": _avoid_duplicate_loop_frame_check.button_pressed,
 		"output_directory": _output_path_edit.text.strip_edges(),
@@ -1898,6 +1982,28 @@ func _select_projection_id(projection_id: int) -> void:
 	_camera_projection_option.select(0)
 
 
+func _get_selected_lighting_preset() -> String:
+	if _lighting_preset_option == null or _lighting_preset_option.selected < 0:
+		return PreviewScene.DEFAULT_LIGHTING_PRESET
+
+	var metadata := _lighting_preset_option.get_item_metadata(_lighting_preset_option.selected)
+	return PreviewScene.normalize_lighting_preset(metadata)
+
+
+func _select_lighting_preset(value: Variant) -> void:
+	if _lighting_preset_option == null:
+		return
+
+	var preset := PreviewScene.normalize_lighting_preset(value)
+	for index in range(_lighting_preset_option.item_count):
+		if PreviewScene.normalize_lighting_preset(_lighting_preset_option.get_item_metadata(index)) == preset:
+			_lighting_preset_option.select(index)
+			return
+
+	if _lighting_preset_option.item_count > 0:
+		_lighting_preset_option.select(0)
+
+
 func _get_selected_output_format() -> String:
 	if _output_format_option == null or _output_format_option.selected < 0:
 		return Exporter.DEFAULT_OUTPUT_FORMAT
@@ -1953,6 +2059,12 @@ func _validate_export_settings_for(settings: Dictionary, has_loaded_source: bool
 
 	var normalized_settings: Dictionary = validation.settings
 	var animation_name := str(normalized_settings.get("animation_name", "")).strip_edges()
+	if not animation_name.is_empty() and bool(normalized_settings.get("turntable_enabled", false)):
+		return {
+			"ok": false,
+			"message": "Turntable rendering is only available for static model exports.",
+		}
+
 	if not animation_name.is_empty():
 		if not _has_selected_animation() or not is_instance_valid(_animation_player) or not _animation_player.has_animation(animation_name):
 			return {
@@ -1975,11 +2087,17 @@ func _export_sprite_sheets() -> void:
 	var export_items: Array = validation.items
 	var export_scene_settings := _collect_profile_settings()
 	_is_exporting = true
-	_export_button.disabled = true
+	_cancel_export_requested = false
+	_export_button.disabled = false
+	_export_button.text = "Cancel Export"
 	var exported_file_count := 0
 	var output_dir := str(export_items[0]["output_path"]).get_base_dir()
 
 	for index in range(export_items.size()):
+		if _is_export_cancel_requested():
+			_finish_export(Capture.CANCELLED_MESSAGE, false)
+			return
+
 		var settings: Dictionary = export_items[index]
 		var source_path := str(settings["source_path"])
 		var source_name := source_path.get_file()
@@ -2012,17 +2130,40 @@ func _export_sprite_sheets() -> void:
 				str(settings["animation_name"]),
 				int(settings["frame_count"]),
 				bool(settings.get("avoid_duplicate_loop_frame", true)),
-				settings
+				settings,
+				Callable(self, "_is_export_cancel_requested")
 			)
 			if not capture_result.ok:
-				_finish_export("Export failed for \"%s\": %s" % [source_name, capture_result.message], true)
+				_finish_export(_format_capture_failure(source_name, capture_result.message), capture_result.message != Capture.CANCELLED_MESSAGE)
+				return
+
+			export_result = _write_animation_export(capture_result.frames, settings)
+		elif _settings_use_turntable(settings):
+			capture_result = await Capture.capture_turntable_frames(
+				_scene_root,
+				_scene_root.get_path_to(_object_root),
+				frame_size,
+				bool(settings["transparent_background"]),
+				int(settings["frame_count"]),
+				float(settings.get("turntable_degrees", 360.0)),
+				settings,
+				Callable(self, "_is_export_cancel_requested")
+			)
+			if not capture_result.ok:
+				_finish_export(_format_capture_failure(source_name, capture_result.message), capture_result.message != Capture.CANCELLED_MESSAGE)
 				return
 
 			export_result = _write_animation_export(capture_result.frames, settings)
 		else:
-			capture_result = await Capture.capture_scene(_scene_root, frame_size, bool(settings["transparent_background"]), settings)
+			capture_result = await Capture.capture_scene(
+				_scene_root,
+				frame_size,
+				bool(settings["transparent_background"]),
+				settings,
+				Callable(self, "_is_export_cancel_requested")
+			)
 			if not capture_result.ok:
-				_finish_export("Export failed for \"%s\": %s" % [source_name, capture_result.message], true)
+				_finish_export(_format_capture_failure(source_name, capture_result.message), capture_result.message != Capture.CANCELLED_MESSAGE)
 				return
 
 			export_result = _write_static_export(capture_result.image, settings)
@@ -2054,6 +2195,10 @@ func _settings_use_animation(settings: Dictionary) -> bool:
 	return not str(settings.get("animation_name", "")).strip_edges().is_empty()
 
 
+func _settings_use_turntable(settings: Dictionary) -> bool:
+	return bool(settings.get("turntable_enabled", false))
+
+
 func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictionary:
 	if captured_frame == null or captured_frame.is_empty():
 		return {
@@ -2077,8 +2222,26 @@ func _write_animation_export(frames: Array[Image], settings: Dictionary) -> Dict
 
 func _finish_export(message: String, is_error: bool) -> void:
 	_is_exporting = false
+	_cancel_export_requested = false
 	_export_button.disabled = false
+	_export_button.text = "Export Sprite Sheet"
 	_set_export_result(message, is_error)
+
+
+func _request_export_cancel() -> void:
+	_cancel_export_requested = true
+	_set_export_result("Cancelling export...", false)
+
+
+func _is_export_cancel_requested() -> bool:
+	return _cancel_export_requested
+
+
+func _format_capture_failure(source_name: String, message: String) -> String:
+	if message == Capture.CANCELLED_MESSAGE:
+		return message
+
+	return "Export failed for \"%s\": %s" % [source_name, message]
 
 
 func _set_export_result(message: String, is_error: bool) -> void:

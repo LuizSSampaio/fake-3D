@@ -4,8 +4,10 @@ extends RefCounted
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
 const AnimationUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_animation_utils.gd")
 
+const CANCELLED_MESSAGE := "Export cancelled."
 
-static func capture_scene(scene_root: Node3D, frame_size: Vector2i, transparent_background: bool, render_settings := {}) -> Dictionary:
+
+static func capture_scene(scene_root: Node3D, frame_size: Vector2i, transparent_background: bool, render_settings := {}, cancel_callback := Callable()) -> Dictionary:
 	if scene_root == null:
 		return _failure("Preview scene is not available for capture.")
 
@@ -33,6 +35,9 @@ static func capture_scene(scene_root: Node3D, frame_size: Vector2i, transparent_
 	viewport.add_child(captured_scene)
 
 	for _index in range(RenderOptions.get_capture_frame_count(normalized_render_settings)):
+		if _is_cancelled(cancel_callback):
+			viewport.queue_free()
+			return _failure(CANCELLED_MESSAGE)
 		await tree.process_frame
 
 	var texture := viewport.get_texture()
@@ -66,7 +71,8 @@ static func capture_animation_frames(
 	animation_name: String,
 	frame_count: int,
 	avoid_duplicate_loop_frame: bool,
-	render_settings := {}
+	render_settings := {},
+	cancel_callback := Callable()
 ) -> Dictionary:
 	if scene_root == null:
 		return _failure("Preview scene is not available for capture.")
@@ -114,12 +120,19 @@ static func capture_animation_frames(
 	var sample_times: PackedFloat32Array = sample_plan.sample_times
 	var frames: Array[Image] = []
 	for sample_time in sample_times:
+		if _is_cancelled(cancel_callback):
+			viewport.queue_free()
+			return _failure(CANCELLED_MESSAGE)
+
 		var seek_result := AnimationUtils.seek_player(animation_player, animation_name, sample_time)
 		if not seek_result.ok:
 			viewport.queue_free()
 			return seek_result
 
 		for _index in range(RenderOptions.get_capture_frame_count(normalized_render_settings)):
+			if _is_cancelled(cancel_callback):
+				viewport.queue_free()
+				return _failure(CANCELLED_MESSAGE)
 			await tree.process_frame
 
 		var frame_result := _read_viewport_image(viewport, frame_size, normalized_render_settings)
@@ -135,6 +148,92 @@ static func capture_animation_frames(
 		"frames": frames,
 		"sample_times": sample_times,
 	}
+
+
+static func capture_turntable_frames(
+	scene_root: Node3D,
+	object_root_path: NodePath,
+	frame_size: Vector2i,
+	transparent_background: bool,
+	frame_count: int,
+	turntable_degrees: float,
+	render_settings := {},
+	cancel_callback := Callable()
+) -> Dictionary:
+	if scene_root == null:
+		return _failure("Preview scene is not available for capture.")
+
+	if frame_size.x <= 0 or frame_size.y <= 0:
+		return _failure("Export frame size must be greater than zero.")
+
+	if frame_count <= 0:
+		return _failure("Frame count must be greater than zero.")
+
+	var normalized_render_settings := RenderOptions.normalize(render_settings)
+	var capture_validation := RenderOptions.validate_capture_size(frame_size, normalized_render_settings)
+	if not capture_validation.ok:
+		return capture_validation
+
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return _failure("Scene tree is not available for capture.")
+
+	var viewport := SubViewport.new()
+	viewport.size = capture_validation.capture_size
+	viewport.own_world_3d = true
+	viewport.transparent_bg = transparent_background
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	RenderOptions.apply_to_viewport(viewport, normalized_render_settings)
+	tree.root.add_child(viewport)
+
+	var captured_scene := scene_root.duplicate()
+	viewport.add_child(captured_scene)
+
+	var captured_object_root := captured_scene.get_node_or_null(object_root_path) as Node3D
+	if captured_object_root == null:
+		viewport.queue_free()
+		return _failure("Turntable object root is not available for export.")
+
+	var base_rotation := captured_object_root.rotation_degrees
+	var angles := build_turntable_angles(frame_count, turntable_degrees)
+	var frames: Array[Image] = []
+	for angle in angles:
+		if _is_cancelled(cancel_callback):
+			viewport.queue_free()
+			return _failure(CANCELLED_MESSAGE)
+
+		captured_object_root.rotation_degrees = base_rotation + Vector3(0.0, angle, 0.0)
+		for _index in range(RenderOptions.get_capture_frame_count(normalized_render_settings)):
+			if _is_cancelled(cancel_callback):
+				viewport.queue_free()
+				return _failure(CANCELLED_MESSAGE)
+			await tree.process_frame
+
+		var frame_result := _read_viewport_image(viewport, frame_size, normalized_render_settings)
+		if not frame_result.ok:
+			viewport.queue_free()
+			return frame_result
+
+		frames.append(frame_result.image)
+
+	viewport.queue_free()
+	return {
+		"ok": true,
+		"frames": frames,
+		"turntable_angles": angles,
+	}
+
+
+static func build_turntable_angles(frame_count: int, turntable_degrees: float) -> PackedFloat32Array:
+	var angles := PackedFloat32Array()
+	if frame_count <= 0:
+		return angles
+
+	var step := turntable_degrees / float(frame_count)
+	for index in range(frame_count):
+		angles.append(step * float(index))
+
+	return angles
 
 
 static func build_animation_sample_plan(
@@ -161,6 +260,10 @@ static func build_animation_sample_plan(
 			avoid_endpoint
 		),
 	}
+
+
+static func _is_cancelled(cancel_callback: Callable) -> bool:
+	return cancel_callback.is_valid() and bool(cancel_callback.call())
 
 
 static func _read_viewport_image(viewport: SubViewport, frame_size: Vector2i, render_settings: Dictionary) -> Dictionary:

@@ -52,11 +52,23 @@ static func frame_bounds(
 	bounds: AABB,
 	preview_margin: float,
 	fixed_position: Vector3,
-	fixed_rotation: Vector3
+	fixed_rotation: Vector3,
+	frame_size := Vector2i.ZERO
 ) -> void:
-	var largest_axis := max(bounds.size.x, max(bounds.size.y, bounds.size.z))
-	orthographic_size_spin.set_value_no_signal(max(largest_axis * preview_margin, 0.01))
+	orthographic_size_spin.set_value_no_signal(calculate_orthographic_size(bounds, frame_size, preview_margin))
 	sync_from_controls(camera, projection_option, fov_spin, orthographic_size_spin, fixed_position, fixed_rotation)
+
+
+static func calculate_orthographic_size(bounds: AABB, frame_size: Vector2i, preview_margin: float) -> float:
+	var aspect_ratio := 1.0
+	if frame_size.x > 0 and frame_size.y > 0:
+		aspect_ratio = float(frame_size.x) / float(frame_size.y)
+
+	var height_requirement: float = bounds.size.y
+	var width_requirement: float = bounds.size.x / max(aspect_ratio, 0.001)
+	var depth_requirement: float = bounds.size.z * 0.5
+	var required_size: float = max(height_requirement, max(width_requirement, depth_requirement))
+	return max(required_size * preview_margin, 0.01)
 
 
 static func set_vector3_controls(controls: Array[Range], value: Vector3) -> void:
