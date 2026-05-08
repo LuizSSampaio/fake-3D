@@ -685,6 +685,24 @@ func test_dock_single_source_export_writes_sheet_and_repeated_individual_frames_
 	assert_vector(sheet.get_size()).is_equal(Vector2i(34, 16))
 
 
+func test_export_source_reload_preserves_current_object_transform_snapshot() -> void:
+	var object_position := Vector3(1.25, -0.5, 2.0)
+	var object_rotation := Vector3(10.0, 35.0, -15.0)
+	var source_path := _save_test_scene("dock_export_position_model.tscn")
+	_dock._load_source(source_path)
+	_set_vector3_spin_values(_dock._object_position_controls, object_position)
+	_set_vector3_spin_values(_dock._object_rotation_controls, object_rotation)
+	_dock._on_object_control_changed(0.0)
+	var export_scene_settings: Dictionary = _dock._collect_profile_settings()
+
+	_dock._reset_object_transform()
+	var result: Dictionary = _dock._load_source_for_export(source_path, export_scene_settings)
+
+	assert_bool(result.ok).is_true()
+	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
+	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
+
+
 func _add_mesh_instance(parent: Node, size: Vector3, position: Vector3, is_visible := true) -> MeshInstance3D:
 	var mesh := BoxMesh.new()
 	mesh.size = size

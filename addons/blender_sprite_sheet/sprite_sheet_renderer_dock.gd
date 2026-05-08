@@ -1237,6 +1237,7 @@ func _export_sprite_sheets() -> void:
 		return
 
 	var export_items: Array = validation.items
+	var export_scene_settings := _collect_profile_settings()
 	_is_exporting = true
 	_export_button.disabled = true
 	var exported_file_count := 0
@@ -1248,7 +1249,7 @@ func _export_sprite_sheets() -> void:
 		var source_name := source_path.get_file()
 		_set_export_result("Rendering %d/%d: %s" % [index + 1, export_items.size(), source_name], false)
 
-		var load_result := _preview_source(source_path)
+		var load_result := _load_source_for_export(source_path, export_scene_settings)
 		if not load_result.ok:
 			_finish_export("Export failed for %s: %s" % [source_name, load_result.message], true)
 			return
@@ -1278,6 +1279,15 @@ func _export_sprite_sheets() -> void:
 		exported_file_count += exported_paths.size()
 
 	_finish_export("Exported %d source model(s) to %s (%d PNG file(s))." % [export_items.size(), output_dir, exported_file_count], false)
+
+
+func _load_source_for_export(source_path: String, export_scene_settings: Dictionary) -> Dictionary:
+	var load_result := _preview_source(source_path)
+	if not load_result.ok:
+		return load_result
+
+	_apply_profile_settings(export_scene_settings)
+	return load_result
 
 
 func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictionary:
