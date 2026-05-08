@@ -32,6 +32,8 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_bool(_dock._checkerboard.visible).is_true()
 	assert_object(_dock._export_frame_overlay).is_not_null()
 	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(256, 256))
+	assert_int(_dock._source_list.item_count).is_equal(0)
+	assert_str(_dock._name_pattern_edit.text).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_NAME_PATTERN)
 	assert_bool(_dock._background_color_picker.disabled).is_true()
 	assert_object(_dock._object_root).is_not_null()
 	assert_vector(_dock._object_root.position).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_POSITION)
@@ -53,7 +55,7 @@ func test_source_path_validation_accepts_supported_extensions_case_insensitively
 
 func test_load_source_reports_actionable_status_for_invalid_paths() -> void:
 	_dock._load_source("   ")
-	assert_str(_dock._status_label.text).is_equal("Choose a source asset before reloading.")
+	assert_str(_dock._status_label.text).is_equal("Select a supported 3D asset to preview.")
 
 	_dock._load_source("res://missing.txt")
 	assert_str(_dock._status_label.text).contains("Unsupported source type")
@@ -88,6 +90,8 @@ func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> 
 	assert_str(_dock._status_label.text).is_equal("Loaded load_source_model.tscn")
 	assert_object(_dock._loaded_source).is_not_null()
 	assert_int(_dock._model_root.get_child_count()).is_equal(1)
+	assert_int(_dock._source_paths.size()).is_equal(1)
+	assert_str(_dock._source_paths[0]).is_equal(source_path)
 
 	var bounds: Dictionary = _dock._calculate_model_bounds()
 	assert_bool(bounds.has_value).is_true()
@@ -100,7 +104,26 @@ func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> 
 	assert_int(int(_dock._frame_count_spin.value)).is_equal(1)
 	assert_int(int(_dock._columns_spin.value)).is_equal(1)
 	assert_int(int(_dock._frame_spacing_spin.value)).is_equal(0)
-	assert_str(_dock._export_result_label.text).is_equal("Static PNG export is ready after a source is loaded.")
+	assert_str(_dock._export_result_label.text).is_equal("PNG export is ready after source models are loaded.")
+
+
+func test_source_selection_deduplicates_and_previews_first_model() -> void:
+	var first_path := _save_test_scene("source_first_model.tscn")
+	var second_path := _save_test_scene("source_second_model.tscn")
+	var paths := PackedStringArray()
+	paths.append(first_path)
+	paths.append(second_path)
+	paths.append(first_path)
+
+	_dock._set_source_paths(paths)
+
+	assert_int(_dock._source_paths.size()).is_equal(2)
+	assert_int(_dock._source_list.item_count).is_equal(2)
+	assert_str(_dock._source_list.get_item_text(0)).is_equal("source_first_model.tscn")
+	assert_str(_dock._source_list.get_item_text(1)).is_equal("source_second_model.tscn")
+	assert_str(_dock._source_path_edit.text).is_equal(first_path)
+	assert_object(_dock._loaded_source).is_not_null()
+	assert_str(_dock._status_label.text).is_equal("Selected 2 source model(s).")
 
 
 func test_preview_export_overlay_tracks_export_aspect_ratio() -> void:
@@ -211,6 +234,145 @@ func test_camera_lens_controls_keep_camera_pose_fixed() -> void:
 	assert_vector(_dock._camera.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_ROTATION)
 
 
+func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> void:
+	var object_position := Vector3(1.25, -0.5, 2.0)
+	var object_rotation := Vector3(10.0, 35.0, -15.0)
+	var background_color := Color(0.25, 0.5, 0.75, 1.0)
+	_dock._source_path_edit.text = "res://models/book.glb"
+	_dock._output_path_edit.text = "res://exports/book.png"
+	_dock._material_path_edit.text = "res://materials/book.tres"
+	_dock._texture_path_edit.text = "res://textures/book.png"
+	_set_vector3_spin_values(_dock._object_position_controls, object_position)
+	_set_vector3_spin_values(_dock._object_rotation_controls, object_rotation)
+	_dock._camera_projection_option.select(1)
+	_dock._camera_fov_spin.set_value_no_signal(45.0)
+	_dock._camera_orthographic_size_spin.set_value_no_signal(2.5)
+	_dock._transparent_background_check.button_pressed = false
+	_dock._background_color_picker.color = background_color
+	_dock._frame_width_spin.set_value_no_signal(128.0)
+	_dock._frame_height_spin.set_value_no_signal(256.0)
+	_dock._frame_count_spin.set_value_no_signal(8.0)
+	_dock._columns_spin.set_value_no_signal(4.0)
+	_dock._frame_spacing_spin.set_value_no_signal(2.0)
+	_dock._export_individual_frames_check.button_pressed = true
+	_dock._name_pattern_edit.text = "{index}_{model}.png"
+	var profile_base_path := _temp_resource_path("book_profile")
+
+	var result: Dictionary = _dock._save_profile(profile_base_path)
+	var profile_path: String = _dock._profile_path_edit.text
+	var profile: Dictionary = _read_json_file(profile_path)
+
+	assert_bool(result.ok).is_true()
+	assert_str(profile_path).ends_with(".json")
+	assert_bool(FileAccess.file_exists(profile_path)).is_true()
+	assert_str(profile.format).is_equal(SpriteSheetRendererDock.PROFILE_FORMAT)
+	assert_int(int(profile.version)).is_equal(SpriteSheetRendererDock.PROFILE_VERSION)
+	assert_bool(profile.has("source_path")).is_false()
+	assert_bool(profile.has("output_path")).is_false()
+	assert_vector(_vector3_from_array(profile.object.position)).is_equal_approx(object_position, VECTOR_EPSILON)
+	assert_vector(_vector3_from_array(profile.object.rotation_degrees)).is_equal_approx(object_rotation, VECTOR_EPSILON)
+	assert_str(profile.camera.projection).is_equal("orthographic")
+	assert_float(float(profile.camera.fov)).is_equal_approx(45.0, 0.001)
+	assert_float(float(profile.camera.orthographic_size)).is_equal_approx(2.5, 0.001)
+	assert_bool(bool(profile.background.transparent)).is_false()
+	assert_that(_color_from_array(profile.background.color)).is_equal(background_color)
+	assert_str(profile.material.material_path).is_equal("res://materials/book.tres")
+	assert_str(profile.material.texture_path).is_equal("res://textures/book.png")
+	assert_int(int(profile.export.frame_width)).is_equal(128)
+	assert_int(int(profile.export.frame_height)).is_equal(256)
+	assert_int(int(profile.export.frame_count)).is_equal(8)
+	assert_int(int(profile.export.columns)).is_equal(4)
+	assert_int(int(profile.export.frame_spacing)).is_equal(2)
+	assert_bool(bool(profile.export.export_individual_frames)).is_true()
+	assert_str(profile.export.name_pattern).is_equal("{index}_{model}.png")
+
+
+func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> void:
+	var object_position := Vector3(0.5, 1.0, -0.25)
+	var object_rotation := Vector3(0.0, 180.0, 15.0)
+	var background_color := Color(0.1, 0.2, 0.3, 1.0)
+	var profile_path := _temp_resource_path("loaded_profile.json")
+	_write_json_file(profile_path, {
+		"object": {
+			"position": [object_position.x, object_position.y, object_position.z],
+			"rotation": [object_rotation.x, object_rotation.y, object_rotation.z],
+		},
+		"camera": {
+			"projection": "orthographic",
+			"fov": 55.0,
+			"orthographic_size": 3.25,
+		},
+		"background": {
+			"transparent": false,
+			"color": [background_color.r, background_color.g, background_color.b, background_color.a],
+		},
+		"export": {
+			"frame_width": 320,
+			"frame_height": 160,
+			"frame_count": 6,
+			"columns": 3,
+			"frame_spacing": 4,
+			"export_individual_frames": true,
+			"name_pattern": "{model}_{index}.png",
+		},
+	})
+
+	var result: Dictionary = _dock._load_profile(profile_path)
+
+	assert_bool(result.ok).is_true()
+	assert_str(_dock._status_label.text).is_equal("Loaded profile loaded_profile.json")
+	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
+	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
+	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_ORTHOGONAL)
+	assert_bool(_dock._camera_orthographic_size_spin.editable).is_true()
+	assert_float(_dock._camera.fov).is_equal_approx(55.0, 0.001)
+	assert_float(_dock._camera.size).is_equal_approx(3.25, 0.001)
+	assert_bool(_dock._viewport.transparent_bg).is_false()
+	assert_bool(_dock._background_color_picker.disabled).is_false()
+	assert_that(_dock._world_environment.environment.background_color).is_equal(background_color)
+	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(320, 160))
+	assert_int(int(_dock._frame_count_spin.value)).is_equal(6)
+	assert_int(int(_dock._columns_spin.value)).is_equal(3)
+	assert_int(int(_dock._frame_spacing_spin.value)).is_equal(4)
+	assert_bool(_dock._export_individual_frames_check.button_pressed).is_true()
+	assert_str(_dock._name_pattern_edit.text).is_equal("{model}_{index}.png")
+
+	_dock._load_source(_save_test_scene("profiled_model.tscn"))
+
+	assert_str(_dock._status_label.text).is_equal("Loaded profiled_model.tscn")
+	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
+	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
+	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_ORTHOGONAL)
+	assert_float(_dock._camera.size).is_equal_approx(3.25, 0.001)
+	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(320, 160))
+
+
+func test_load_profile_reports_invalid_json() -> void:
+	var profile_path := _temp_resource_path("invalid_profile.json")
+	_write_text_file(profile_path, "{")
+
+	var result: Dictionary = _dock._load_profile(profile_path)
+
+	assert_bool(result.ok).is_false()
+	assert_str(_dock._status_label.text).contains("Profile JSON is invalid")
+
+
+func test_load_profile_accepts_minimal_position_rotation_definition() -> void:
+	var object_position := Vector3(2.0, 3.0, 4.0)
+	var object_rotation := Vector3(15.0, 30.0, 45.0)
+	var profile_path := _temp_resource_path("minimal_profile.json")
+	_write_json_file(profile_path, {
+		"Pos": [object_position.x, object_position.y, object_position.z],
+		"Rotation": [object_rotation.x, object_rotation.y, object_rotation.z],
+	})
+
+	var result: Dictionary = _dock._load_profile(profile_path)
+
+	assert_bool(result.ok).is_true()
+	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
+	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
+
+
 func test_reset_object_restores_object_transform_without_moving_camera() -> void:
 	_dock._load_source(_save_test_scene("reset_object_model.tscn"))
 	_dock._camera_orthographic_size_spin.set_value_no_signal(9.0)
@@ -249,7 +411,7 @@ func test_export_validation_reports_missing_source_and_invalid_output_settings()
 	var validation: Dictionary = _dock._validate_export_settings()
 
 	assert_bool(validation.ok).is_false()
-	assert_str(validation.message).is_equal("Load a source asset before exporting.")
+	assert_str(validation.message).is_equal("Select at least one source model before exporting.")
 
 	_dock._load_source(_save_test_scene("export_validation_model.tscn"))
 	_dock._output_path_edit.text = ""
@@ -271,6 +433,54 @@ func test_exporter_layout_accounts_for_columns_rows_and_spacing() -> void:
 	assert_int(layout.columns).is_equal(2)
 	assert_int(layout.rows).is_equal(3)
 	assert_vector(layout.sheet_size).is_equal(Vector2i(35, 30))
+
+
+func test_exporter_formats_source_output_paths_from_pattern() -> void:
+	var output_path := "res://exports/base_sheet.png"
+	var source_path := "res://models/Book Scene.glb"
+
+	var formatted_name := SpriteSheetExporter.format_output_name("{output}_{index}_{model}.png", source_path, 1, 12, output_path)
+	var source_output_path := SpriteSheetExporter.get_source_output_path(output_path, source_path, "{output}_{index}_{model}", 1, 12)
+
+	assert_str(formatted_name).is_equal("base_sheet_002_Book Scene.png")
+	assert_str(source_output_path).is_equal("res://exports/base_sheet_002_Book Scene.png")
+
+
+func test_export_validation_builds_source_output_paths_from_pattern() -> void:
+	var first_path := _save_test_scene("source_validate_first.tscn")
+	var second_path := _save_test_scene("source_validate_second.tscn")
+	var paths := PackedStringArray()
+	paths.append(first_path)
+	paths.append(second_path)
+	_dock._set_source_paths(paths, false)
+	_dock._output_path_edit.text = _temp_resource_path("source_base.png")
+	_dock._name_pattern_edit.text = "{index}_{model}"
+
+	var validation: Dictionary = _dock._validate_export_settings()
+
+	assert_bool(validation.ok).is_true()
+	var items: Array = validation.items
+	assert_array(items).has_size(2)
+	assert_str(items[0].output_path).ends_with("001_source_validate_first.png")
+	assert_str(items[1].output_path).ends_with("002_source_validate_second.png")
+	assert_str(items[0].source_path).is_equal(first_path)
+	assert_str(items[1].source_path).is_equal(second_path)
+
+
+func test_export_validation_rejects_duplicate_generated_names() -> void:
+	var first_path := _save_test_scene("duplicate_source_first.tscn")
+	var second_path := _save_test_scene("duplicate_source_second.tscn")
+	var paths := PackedStringArray()
+	paths.append(first_path)
+	paths.append(second_path)
+	_dock._set_source_paths(paths, false)
+	_dock._output_path_edit.text = _temp_resource_path("source_base.png")
+	_dock._name_pattern_edit.text = "same_name.png"
+
+	var validation: Dictionary = _dock._validate_export_settings()
+
+	assert_bool(validation.ok).is_false()
+	assert_str(validation.message).contains("duplicate output path")
 
 
 func test_exporter_assembles_sheet_and_keeps_empty_trailing_cells_transparent() -> void:
@@ -321,7 +531,7 @@ func test_exporter_writes_sprite_sheet_and_individual_png_frames() -> void:
 	assert_vector(sheet.get_size()).is_equal(Vector2i(9, 4))
 
 
-func test_dock_static_export_writes_sheet_and_repeated_individual_frames_from_capture() -> void:
+func test_dock_single_source_export_writes_sheet_and_repeated_individual_frames_from_capture() -> void:
 	_dock._load_source(_save_test_scene("dock_export_model.tscn"))
 	_dock._frame_width_spin.set_value_no_signal(16.0)
 	_dock._frame_height_spin.set_value_no_signal(16.0)
@@ -337,14 +547,16 @@ func test_dock_static_export_writes_sheet_and_repeated_individual_frames_from_ca
 
 	var export_result: Dictionary = _dock._write_static_export(_create_color_image(16, 16, Color(1.0, 0.0, 0.0, 1.0)), validation.settings)
 
-	var frame_paths := SpriteSheetExporter.get_individual_frame_paths(output_path, 2)
+	var source_output_path: String = validation.settings.output_path
+	var frame_paths := SpriteSheetExporter.get_individual_frame_paths(source_output_path, 2)
 	assert_bool(export_result.ok).is_true()
 	assert_str(export_result.message).contains("Exported 3 PNG file(s).")
-	assert_bool(FileAccess.file_exists(output_path)).is_true()
+	assert_str(source_output_path).ends_with("dock_export_model.png")
+	assert_bool(FileAccess.file_exists(source_output_path)).is_true()
 	assert_bool(FileAccess.file_exists(frame_paths[0])).is_true()
 	assert_bool(FileAccess.file_exists(frame_paths[1])).is_true()
 
-	var sheet := Image.load_from_file(output_path)
+	var sheet := Image.load_from_file(source_output_path)
 	assert_object(sheet).is_not_null()
 	assert_vector(sheet.get_size()).is_equal(Vector2i(34, 16))
 
@@ -386,6 +598,34 @@ func _save_test_scene(file_name: String) -> String:
 
 func _temp_resource_path(file_name: String) -> String:
 	return create_temp_dir("blender_sprite_sheet").path_join(file_name)
+
+
+func _write_json_file(path: String, data: Dictionary) -> void:
+	_write_text_file(path, JSON.stringify(data, "\t"))
+
+
+func _write_text_file(path: String, text: String) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_object(file).is_not_null()
+	file.store_string(text)
+	file.flush()
+	file.close()
+
+
+func _read_json_file(path: String) -> Dictionary:
+	var file := FileAccess.open(path, FileAccess.READ)
+	assert_object(file).is_not_null()
+	var json := JSON.new()
+	assert_int(json.parse(file.get_as_text())).is_equal(OK)
+	return json.data
+
+
+func _vector3_from_array(values: Array) -> Vector3:
+	return Vector3(float(values[0]), float(values[1]), float(values[2]))
+
+
+func _color_from_array(values: Array) -> Color:
+	return Color(float(values[0]), float(values[1]), float(values[2]), float(values[3]))
 
 
 func _create_color_image(width: int, height: int, color: Color) -> Image:

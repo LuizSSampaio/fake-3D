@@ -61,3 +61,10 @@ static func set_vector3_controls(controls: Array[SpinBox], value: Vector3) -> vo
 	controls[0].set_value_no_signal(value.x)
 	controls[1].set_value_no_signal(value.y)
 	controls[2].set_value_no_signal(value.z)
+
+
+static func get_vector3_from_controls(controls: Array[SpinBox], fallback := Vector3.ZERO) -> Vector3:
+	if controls.size() < 3:
+		return fallback
+
+	return Vector3(controls[0].value, controls[1].value, controls[2].value)

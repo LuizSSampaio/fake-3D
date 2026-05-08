@@ -2,6 +2,7 @@
 extends RefCounted
 
 const DEFAULT_FRAME_DIGITS := 3
+const DEFAULT_OUTPUT_NAME_PATTERN := "{model}.png"
 
 
 static func validate_export_settings(settings: Dictionary, has_loaded_source: bool) -> Dictionary:
@@ -60,6 +61,40 @@ static func normalize_png_output_path(path: String) -> String:
 		return "%s.png" % clean_path
 
 	return clean_path
+
+
+static func format_output_name(pattern: String, source_path: String, index: int, count: int, output_path := "") -> String:
+	var clean_pattern := pattern.strip_edges()
+	if clean_pattern.is_empty():
+		clean_pattern = DEFAULT_OUTPUT_NAME_PATTERN
+
+	var source_name := source_path.get_file().get_basename()
+	var base_output_name := normalize_png_output_path(output_path).get_file().get_basename()
+	if base_output_name.is_empty():
+		base_output_name = "sprite_sheet"
+
+	var digits := max(DEFAULT_FRAME_DIGITS, str(max(count, 1)).length())
+	var output_name := clean_pattern
+	output_name = output_name.replace("{model}", source_name)
+	output_name = output_name.replace("{source}", source_name)
+	output_name = output_name.replace("{index}", str(index + 1).pad_zeros(digits))
+	output_name = output_name.replace("{index0}", str(index).pad_zeros(digits))
+	output_name = output_name.replace("{count}", str(count))
+	output_name = output_name.replace("{output}", base_output_name)
+	return output_name
+
+
+static func get_source_output_path(output_path: String, source_path: String, pattern: String, index: int, count: int) -> String:
+	var base_output_path := normalize_png_output_path(output_path)
+	var base_dir := base_output_path.get_base_dir()
+	var file_name := format_output_name(pattern, source_path, index, count, base_output_path).strip_edges()
+	if file_name.get_extension().is_empty():
+		file_name = "%s.png" % file_name
+
+	if base_dir.is_empty():
+		return file_name
+
+	return base_dir.path_join(file_name)
 
 
 static func calculate_layout(frame_count: int, columns: int, frame_width: int, frame_height: int, frame_spacing: int) -> Dictionary:

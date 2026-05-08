@@ -10,6 +10,10 @@ const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_fr
 const CameraController := preload("res://addons/blender_sprite_sheet/sprite_sheet_camera_controller.gd")
 const Capture := preload("res://addons/blender_sprite_sheet/sprite_sheet_capture.gd")
 const Exporter := preload("res://addons/blender_sprite_sheet/sprite_sheet_exporter.gd")
+const ProfileStore := preload("res://addons/blender_sprite_sheet/sprite_sheet_profile_store.gd")
+const SourceSelection := preload("res://addons/blender_sprite_sheet/sprite_sheet_source_selection.gd")
+const ExportPlan := preload("res://addons/blender_sprite_sheet/sprite_sheet_export_plan.gd")
+const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
 
 const SUPPORTED_EXTENSIONS := SourceLoader.SUPPORTED_EXTENSIONS
 const DEFAULT_CAMERA_POSITION := Vector3(0.0, 1.5, 4.0)
@@ -18,12 +22,19 @@ const DEFAULT_OBJECT_POSITION := Vector3.ZERO
 const DEFAULT_OBJECT_ROTATION := Vector3.ZERO
 const PREVIEW_MARGIN := 1.3
 const PREVIEW_TARGET_SIZE := 1.0
+const PROFILE_FORMAT := ProfileStore.FORMAT
+const PROFILE_VERSION := ProfileStore.VERSION
 
 var _source_path_edit: LineEdit
+var _profile_path_edit: LineEdit
 var _material_path_edit: LineEdit
 var _texture_path_edit: LineEdit
+var _source_list: ItemList
+var _name_pattern_edit: LineEdit
 var _status_label: Label
 var _source_file_dialog: EditorFileDialog
+var _profile_open_dialog: EditorFileDialog
+var _profile_save_dialog: EditorFileDialog
 var _material_file_dialog: EditorFileDialog
 var _texture_file_dialog: EditorFileDialog
 var _output_file_dialog: EditorFileDialog
@@ -54,6 +65,8 @@ var _export_individual_frames_check: CheckBox
 var _export_button: Button
 var _export_result_label: Label
 var _loaded_source: Node
+var _active_profile: Dictionary = {}
+var _source_paths := PackedStringArray()
 var _is_exporting := false
 
 
@@ -82,7 +95,7 @@ func _build_ui() -> void:
 	content.add_theme_constant_override("separation", 8)
 	scroll.add_child(content)
 
-	content.add_child(_create_section_label("Source"))
+	content.add_child(ControlFactory.create_section_label("Source"))
 	content.add_child(_create_source_controls())
 
 	_status_label = Label.new()
@@ -90,29 +103,25 @@ func _build_ui() -> void:
 	_status_label.text = "Select a supported 3D asset to preview."
 	content.add_child(_status_label)
 
-	content.add_child(_create_section_label("Preview"))
+	content.add_child(ControlFactory.create_section_label("Preview"))
 	content.add_child(_create_preview_controls())
 
-	content.add_child(_create_section_label("Object"))
+	content.add_child(ControlFactory.create_section_label("Object"))
 	content.add_child(_create_object_controls())
 
-	content.add_child(_create_section_label("Material"))
+	content.add_child(ControlFactory.create_section_label("Profile"))
+	content.add_child(_create_profile_controls())
+
+	content.add_child(ControlFactory.create_section_label("Material"))
 	content.add_child(_create_material_controls())
 
-	content.add_child(_create_section_label("Background"))
+	content.add_child(ControlFactory.create_section_label("Background"))
 	content.add_child(_create_background_controls())
 
-	content.add_child(_create_section_label("Export"))
+	content.add_child(ControlFactory.create_section_label("Export"))
 	content.add_child(_create_export_controls())
 
 	_create_file_dialogs()
-
-
-func _create_section_label(text: String) -> Label:
-	var label := Label.new()
-	label.text = text
-	label.add_theme_font_size_override("font_size", 16)
-	return label
 
 
 func _create_source_controls() -> Control:
@@ -134,10 +143,72 @@ func _create_source_controls() -> Control:
 	browse_button.pressed.connect(_on_browse_pressed)
 	picker_row.add_child(browse_button)
 
+	var action_row := HBoxContainer.new()
+	action_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
 	var reload_button := Button.new()
 	reload_button.text = "Reload"
+	reload_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	reload_button.pressed.connect(_reload_source)
-	container.add_child(reload_button)
+	action_row.add_child(reload_button)
+
+	var clear_button := Button.new()
+	clear_button.text = "Clear"
+	clear_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clear_button.pressed.connect(_clear_sources)
+	action_row.add_child(clear_button)
+	container.add_child(action_row)
+
+	var source_row := HBoxContainer.new()
+	source_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	source_row.add_child(ControlFactory.create_row_label("Models"))
+
+	_source_list = ItemList.new()
+	_source_list.custom_minimum_size = Vector2(0.0, 72.0)
+	_source_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_source_list.select_mode = ItemList.SELECT_SINGLE
+	_source_list.item_selected.connect(_on_source_list_item_selected)
+	source_row.add_child(_source_list)
+	container.add_child(source_row)
+
+	return container
+
+
+func _create_profile_controls() -> Control:
+	var container := VBoxContainer.new()
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var path_row := HBoxContainer.new()
+	path_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	path_row.add_child(ControlFactory.create_row_label("Config"))
+
+	_profile_path_edit = LineEdit.new()
+	_profile_path_edit.placeholder_text = "res://sprite_sheet_profile.json"
+	_profile_path_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_profile_path_edit.text_submitted.connect(_on_profile_path_submitted)
+	path_row.add_child(_profile_path_edit)
+
+	var browse_button := Button.new()
+	browse_button.text = "Browse"
+	browse_button.pressed.connect(_on_profile_browse_pressed)
+	path_row.add_child(browse_button)
+	container.add_child(path_row)
+
+	var action_row := HBoxContainer.new()
+	action_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var load_button := Button.new()
+	load_button.text = "Load Profile"
+	load_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	load_button.pressed.connect(_on_load_profile_pressed)
+	action_row.add_child(load_button)
+
+	var save_button := Button.new()
+	save_button.text = "Save Profile"
+	save_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	save_button.pressed.connect(_on_save_profile_pressed)
+	action_row.add_child(save_button)
+	container.add_child(action_row)
 
 	return container
 
@@ -160,7 +231,7 @@ func _create_material_controls() -> Control:
 func _create_resource_picker_row(label_text: String, placeholder: String, browse_callback: Callable, submit_callback: Callable, clear_callback: Callable) -> Control:
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(_create_row_label(label_text))
+	row.add_child(ControlFactory.create_row_label(label_text))
 
 	var path_edit := LineEdit.new()
 	path_edit.placeholder_text = placeholder
@@ -220,11 +291,11 @@ func _create_object_controls() -> Control:
 	var container := VBoxContainer.new()
 	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	_object_position_controls = _create_vector3_row(container, "Position", DEFAULT_OBJECT_POSITION, -1000.0, 1000.0, 0.01, _on_object_control_changed)
-	_object_rotation_controls = _create_vector3_row(container, "Rotation", DEFAULT_OBJECT_ROTATION, -360.0, 360.0, 0.1, _on_object_control_changed)
+	_object_position_controls = ControlFactory.create_vector3_row(container, "Position", DEFAULT_OBJECT_POSITION, -1000.0, 1000.0, 0.01, _on_object_control_changed)
+	_object_rotation_controls = ControlFactory.create_vector3_row(container, "Rotation", DEFAULT_OBJECT_ROTATION, -360.0, 360.0, 0.1, _on_object_control_changed)
 
 	var projection_row := HBoxContainer.new()
-	projection_row.add_child(_create_row_label("Projection"))
+	projection_row.add_child(ControlFactory.create_row_label("Projection"))
 	_camera_projection_option = OptionButton.new()
 	_camera_projection_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_camera_projection_option.add_item("Perspective", Camera3D.PROJECTION_PERSPECTIVE)
@@ -233,12 +304,12 @@ func _create_object_controls() -> Control:
 	projection_row.add_child(_camera_projection_option)
 	container.add_child(projection_row)
 
-	_camera_fov_spin = _create_spin_box(1.0, 179.0, 0.1, 70.0)
-	_add_labeled_control(container, "FOV", _camera_fov_spin)
+	_camera_fov_spin = ControlFactory.create_spin_box(1.0, 179.0, 0.1, 70.0)
+	ControlFactory.add_labeled_control(container, "FOV", _camera_fov_spin)
 	_camera_fov_spin.value_changed.connect(_on_camera_control_changed)
 
-	_camera_orthographic_size_spin = _create_spin_box(0.001, 1000.0, 0.01, 4.0)
-	_add_labeled_control(container, "Ortho Size", _camera_orthographic_size_spin)
+	_camera_orthographic_size_spin = ControlFactory.create_spin_box(0.001, 1000.0, 0.01, 4.0)
+	ControlFactory.add_labeled_control(container, "Ortho Size", _camera_orthographic_size_spin)
 	_camera_orthographic_size_spin.value_changed.connect(_on_camera_control_changed)
 
 	var frame_button := Button.new()
@@ -267,7 +338,7 @@ func _create_background_controls() -> Control:
 	_background_color_picker = ColorPickerButton.new()
 	_background_color_picker.color = Color(0.12, 0.12, 0.12)
 	_background_color_picker.color_changed.connect(_on_background_color_changed)
-	_add_labeled_control(container, "Color", _background_color_picker)
+	ControlFactory.add_labeled_control(container, "Color", _background_color_picker)
 
 	return container
 
@@ -276,26 +347,26 @@ func _create_export_controls() -> Control:
 	var container := VBoxContainer.new()
 	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	_frame_width_spin = _create_spin_box(1.0, 8192.0, 1.0, 256.0)
-	_add_labeled_control(container, "Width", _frame_width_spin)
+	_frame_width_spin = ControlFactory.create_spin_box(1.0, 8192.0, 1.0, 256.0)
+	ControlFactory.add_labeled_control(container, "Width", _frame_width_spin)
 	_frame_width_spin.value_changed.connect(_on_export_dimensions_changed)
 
-	_frame_height_spin = _create_spin_box(1.0, 8192.0, 1.0, 256.0)
-	_add_labeled_control(container, "Height", _frame_height_spin)
+	_frame_height_spin = ControlFactory.create_spin_box(1.0, 8192.0, 1.0, 256.0)
+	ControlFactory.add_labeled_control(container, "Height", _frame_height_spin)
 	_frame_height_spin.value_changed.connect(_on_export_dimensions_changed)
 
-	_frame_count_spin = _create_spin_box(1.0, 10000.0, 1.0, 1.0)
-	_add_labeled_control(container, "Frames", _frame_count_spin)
+	_frame_count_spin = ControlFactory.create_spin_box(1.0, 10000.0, 1.0, 1.0)
+	ControlFactory.add_labeled_control(container, "Frames", _frame_count_spin)
 
-	_columns_spin = _create_spin_box(1.0, 10000.0, 1.0, 1.0)
-	_add_labeled_control(container, "Columns", _columns_spin)
+	_columns_spin = ControlFactory.create_spin_box(1.0, 10000.0, 1.0, 1.0)
+	ControlFactory.add_labeled_control(container, "Columns", _columns_spin)
 
-	_frame_spacing_spin = _create_spin_box(0.0, 1024.0, 1.0, 0.0)
-	_add_labeled_control(container, "Spacing", _frame_spacing_spin)
+	_frame_spacing_spin = ControlFactory.create_spin_box(0.0, 1024.0, 1.0, 0.0)
+	ControlFactory.add_labeled_control(container, "Spacing", _frame_spacing_spin)
 
 	var output_row := HBoxContainer.new()
 	output_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	output_row.add_child(_create_row_label("Output"))
+	output_row.add_child(ControlFactory.create_row_label("Output"))
 
 	_output_path_edit = LineEdit.new()
 	_output_path_edit.placeholder_text = "res://sprite_sheet.png"
@@ -309,6 +380,12 @@ func _create_export_controls() -> Control:
 	output_row.add_child(output_browse_button)
 	container.add_child(output_row)
 
+	_name_pattern_edit = LineEdit.new()
+	_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
+	_name_pattern_edit.placeholder_text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
+	_name_pattern_edit.tooltip_text = "Tokens: {model}, {source}, {index}, {index0}, {count}, {output}"
+	ControlFactory.add_labeled_control(container, "Name Pattern", _name_pattern_edit)
+
 	_export_individual_frames_check = CheckBox.new()
 	_export_individual_frames_check.text = "Export individual frames"
 	container.add_child(_export_individual_frames_check)
@@ -320,65 +397,37 @@ func _create_export_controls() -> Control:
 
 	_export_result_label = Label.new()
 	_export_result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_export_result_label.text = "Static PNG export is ready after a source is loaded."
+	_export_result_label.text = "PNG export is ready after source models are loaded."
 	container.add_child(_export_result_label)
 
 	return container
-
-
-func _create_vector3_row(parent: BoxContainer, label_text: String, initial_value: Vector3, min_value: float, max_value: float, step: float, callback: Callable) -> Array[SpinBox]:
-	var row := HBoxContainer.new()
-	row.add_child(_create_row_label(label_text))
-
-	var controls: Array[SpinBox] = []
-	var values := [initial_value.x, initial_value.y, initial_value.z]
-	for axis in ["X", "Y", "Z"]:
-		var spin := _create_spin_box(min_value, max_value, step, values[controls.size()])
-		spin.tooltip_text = "%s %s" % [label_text, axis]
-		spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		spin.value_changed.connect(callback)
-		row.add_child(spin)
-		controls.append(spin)
-
-	parent.add_child(row)
-	return controls
-
-
-func _add_labeled_control(parent: BoxContainer, label_text: String, control: Control) -> void:
-	var row := HBoxContainer.new()
-	row.add_child(_create_row_label(label_text))
-	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(control)
-	parent.add_child(row)
-
-
-func _create_row_label(text: String) -> Label:
-	var label := Label.new()
-	label.text = text
-	label.custom_minimum_size.x = 86.0
-	return label
-
-
-func _create_spin_box(min_value: float, max_value: float, step: float, value: float) -> SpinBox:
-	var spin := SpinBox.new()
-	spin.min_value = min_value
-	spin.max_value = max_value
-	spin.step = step
-	spin.value = value
-	spin.allow_greater = true
-	spin.allow_lesser = true
-	return spin
 
 
 func _create_file_dialogs() -> void:
 	if not Engine.is_editor_hint():
 		return
 
-	_source_file_dialog = _create_file_dialog("Select 3D Asset", _on_source_file_selected)
+	_source_file_dialog = EditorFileDialog.new()
+	_source_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILES
+	_source_file_dialog.access = EditorFileDialog.ACCESS_RESOURCES
+	_source_file_dialog.title = "Select 3D Assets"
 	_source_file_dialog.add_filter("*.tscn, *.scn, *.glb, *.gltf, *.obj, *.fbx, *.blend ; Supported 3D assets")
 	_source_file_dialog.add_filter("*.tscn, *.scn ; Godot scenes")
 	_source_file_dialog.add_filter("*.glb, *.gltf, *.obj, *.fbx, *.blend ; Imported 3D assets")
+	_source_file_dialog.files_selected.connect(_on_source_files_selected)
 	add_child(_source_file_dialog)
+
+	_profile_open_dialog = _create_file_dialog("Load Sprite Sheet Profile", _on_profile_file_selected)
+	_profile_open_dialog.add_filter("*.json ; Sprite sheet profile")
+	add_child(_profile_open_dialog)
+
+	_profile_save_dialog = EditorFileDialog.new()
+	_profile_save_dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
+	_profile_save_dialog.access = EditorFileDialog.ACCESS_RESOURCES
+	_profile_save_dialog.title = "Save Sprite Sheet Profile"
+	_profile_save_dialog.add_filter("*.json ; Sprite sheet profile")
+	_profile_save_dialog.file_selected.connect(_on_profile_save_file_selected)
+	add_child(_profile_save_dialog)
 
 	_material_file_dialog = _create_file_dialog("Select Material", _on_material_file_selected)
 	_material_file_dialog.add_filter("*.tres, *.res, *.material ; Godot material resources")
@@ -420,14 +469,19 @@ func _on_browse_pressed() -> void:
 		_source_file_dialog.popup_centered_ratio(0.75)
 
 
-func _on_source_file_selected(path: String) -> void:
-	_source_path_edit.text = path
-	_load_source(path)
+func _on_source_files_selected(paths: PackedStringArray) -> void:
+	_set_source_paths(paths)
 
 
 func _on_material_browse_pressed() -> void:
 	if _material_file_dialog:
 		_material_file_dialog.popup_centered_ratio(0.75)
+
+
+func _on_profile_browse_pressed() -> void:
+	if _profile_open_dialog:
+		_profile_open_dialog.current_path = _profile_path_edit.text
+		_profile_open_dialog.popup_centered_ratio(0.75)
 
 
 func _on_texture_browse_pressed() -> void:
@@ -444,6 +498,16 @@ func _on_output_browse_pressed() -> void:
 func _on_material_file_selected(path: String) -> void:
 	_material_path_edit.text = path
 	_apply_material_settings()
+
+
+func _on_profile_file_selected(path: String) -> void:
+	_profile_path_edit.text = _normalize_profile_path(path)
+	_load_profile(path)
+
+
+func _on_profile_save_file_selected(path: String) -> void:
+	_profile_path_edit.text = _normalize_profile_path(path)
+	_save_profile(path)
 
 
 func _on_texture_file_selected(path: String) -> void:
@@ -464,6 +528,10 @@ func _on_material_path_submitted(path: String) -> void:
 	_apply_material_settings()
 
 
+func _on_profile_path_submitted(path: String) -> void:
+	_profile_path_edit.text = _normalize_profile_path(path)
+
+
 func _on_texture_path_submitted(path: String) -> void:
 	_texture_path_edit.text = path.strip_edges()
 	_apply_material_settings()
@@ -471,6 +539,13 @@ func _on_texture_path_submitted(path: String) -> void:
 
 func _on_output_path_submitted(path: String) -> void:
 	_output_path_edit.text = Exporter.normalize_png_output_path(path)
+
+
+func _on_source_list_item_selected(index: int) -> void:
+	if index < 0 or index >= _source_paths.size():
+		return
+
+	_preview_source(_source_paths[index])
 
 
 func _clear_material_path() -> void:
@@ -484,21 +559,51 @@ func _clear_texture_path() -> void:
 
 
 func _reload_source() -> void:
-	_load_source(_source_path_edit.text)
+	var source_path := _source_path_edit.text.strip_edges()
+	if source_path.is_empty() and not _source_paths.is_empty():
+		source_path = _source_paths[0]
+
+	if source_path.is_empty():
+		_set_status("Select a supported 3D asset to preview.", true)
+		return
+
+	if _source_paths.find(source_path) != -1:
+		_preview_source(source_path)
+	else:
+		_load_source(source_path)
+
+
+func _on_load_profile_pressed() -> void:
+	_load_profile(_profile_path_edit.text)
+
+
+func _on_save_profile_pressed() -> void:
+	var path := _normalize_profile_path(_profile_path_edit.text)
+	if path.is_empty() and _profile_save_dialog:
+		_profile_save_dialog.popup_centered_ratio(0.75)
+		return
+
+	_save_profile(path)
 
 
 func _on_export_pressed() -> void:
 	if _is_exporting:
 		return
 
-	await _export_static_sprite_sheet()
+	await _export_sprite_sheets()
 
 
-func _load_source(path: String) -> void:
+func _load_source(path: String) -> Dictionary:
+	var paths := PackedStringArray()
+	paths.append(path)
+	return _set_source_paths(paths)
+
+
+func _preview_source(path: String) -> Dictionary:
 	var load_result := SourceLoader.load_source(path)
 	if not load_result.ok:
 		_set_status(load_result.message, true)
-		return
+		return load_result
 
 	_clear_loaded_source()
 	_reset_object_transform()
@@ -510,14 +615,64 @@ func _load_source(path: String) -> void:
 	var bounds := _calculate_model_bounds()
 	if not bounds.has_value:
 		_clear_loaded_source()
-		_set_status("No visible mesh found in source asset: %s" % load_result.path, true)
-		return
+		var message := "No visible mesh found in source asset: %s" % load_result.path
+		_set_status(message, true)
+		return {
+			"ok": false,
+			"message": message,
+		}
 
 	_fit_model_to_preview(bounds.aabb)
 	bounds = _calculate_model_bounds()
 	_apply_material_settings(false)
 	_frame_bounds(bounds.aabb)
-	_set_status("Loaded %s" % (load_result.path as String).get_file(), false)
+	if not _active_profile.is_empty():
+		_apply_profile_settings(_active_profile)
+	var message := "Loaded %s" % (load_result.path as String).get_file()
+	_source_path_edit.text = load_result.path
+	_set_status(message, false)
+	return {
+		"ok": true,
+		"message": message,
+		"path": load_result.path,
+	}
+
+
+func _set_source_paths(paths: PackedStringArray, preview_first := true) -> Dictionary:
+	_source_paths = SourceSelection.normalize_paths(paths)
+	_update_source_list()
+
+	if _source_paths.is_empty():
+		_clear_loaded_source()
+		_source_path_edit.clear()
+		var message := "Select a supported 3D asset to preview."
+		_set_status(message, false)
+		return {
+			"ok": false,
+			"message": message,
+		}
+
+	var load_result := {
+		"ok": true,
+		"message": "",
+	}
+	if preview_first:
+		load_result = _preview_source(_source_paths[0])
+		if not load_result.ok:
+			return load_result
+
+	if _source_paths.size() > 1:
+		_set_status("Selected %d source model(s)." % _source_paths.size(), false)
+
+	return load_result
+
+
+func _clear_sources() -> void:
+	_set_source_paths(PackedStringArray(), false)
+
+
+func _update_source_list() -> void:
+	SourceSelection.populate_item_list(_source_list, _source_paths)
 
 
 func _instantiate_resource(resource: Resource) -> Node:
@@ -593,6 +748,108 @@ func _reset_object() -> void:
 
 func _reset_camera() -> void:
 	_reset_object()
+
+
+func _save_profile(path: String) -> Dictionary:
+	var result := ProfileStore.save_profile(path, _collect_profile_settings())
+	if not result.ok:
+		return _profile_failure(result.message, true)
+
+	_profile_path_edit.text = result.path
+	_active_profile = result.profile.duplicate(true)
+	return _profile_success(result.message)
+
+
+func _load_profile(path: String) -> Dictionary:
+	var result := ProfileStore.load_profile(path)
+	if not result.ok:
+		return _profile_failure(result.message, true)
+
+	var profile: Dictionary = result.profile
+	_apply_profile_settings(profile)
+	_profile_path_edit.text = result.path
+	_active_profile = profile.duplicate(true)
+	return _profile_success(result.message)
+
+
+func _collect_profile_settings() -> Dictionary:
+	return {
+		"format": PROFILE_FORMAT,
+		"version": PROFILE_VERSION,
+		"object": {
+			"position": ProfileStore.vector3_to_array(CameraController.get_vector3_from_controls(_object_position_controls)),
+			"rotation_degrees": ProfileStore.vector3_to_array(CameraController.get_vector3_from_controls(_object_rotation_controls)),
+		},
+		"camera": {
+			"projection": _get_selected_projection_name(),
+			"fov": _camera_fov_spin.value,
+			"orthographic_size": _camera_orthographic_size_spin.value,
+		},
+		"material": {
+			"material_path": _material_path_edit.text.strip_edges(),
+			"texture_path": _texture_path_edit.text.strip_edges(),
+		},
+		"background": {
+			"transparent": _transparent_background_check.button_pressed,
+			"color": ProfileStore.color_to_array(_background_color_picker.color),
+		},
+		"export": {
+			"frame_width": int(round(_frame_width_spin.value)),
+			"frame_height": int(round(_frame_height_spin.value)),
+			"frame_count": int(round(_frame_count_spin.value)),
+			"columns": int(round(_columns_spin.value)),
+			"frame_spacing": int(round(_frame_spacing_spin.value)),
+			"export_individual_frames": _export_individual_frames_check.button_pressed,
+			"name_pattern": _name_pattern_edit.text.strip_edges(),
+		},
+	}
+
+
+func _apply_profile_settings(profile: Dictionary) -> void:
+	var object_settings := ProfileStore.dictionary_value(profile, "object")
+	if object_settings.is_empty():
+		object_settings = profile
+
+	if ProfileStore.has_any_key(object_settings, ProfileStore.POSITION_KEYS) or ProfileStore.has_any_key(object_settings, ProfileStore.ROTATION_KEYS):
+		var position := ProfileStore.vector3_any(object_settings, ProfileStore.POSITION_KEYS, CameraController.get_vector3_from_controls(_object_position_controls))
+		var rotation := ProfileStore.vector3_any(object_settings, ProfileStore.ROTATION_KEYS, CameraController.get_vector3_from_controls(_object_rotation_controls))
+		_set_vector3_controls(_object_position_controls, position)
+		_set_vector3_controls(_object_rotation_controls, rotation)
+
+	var camera_settings := ProfileStore.dictionary_value(profile, "camera")
+	if not camera_settings.is_empty():
+		var projection_id := _projection_id_from_value(camera_settings.get("projection", _get_selected_projection_name()))
+		_select_projection_id(projection_id)
+		_camera_fov_spin.set_value_no_signal(float(camera_settings.get("fov", _camera_fov_spin.value)))
+		_camera_orthographic_size_spin.set_value_no_signal(float(camera_settings.get("orthographic_size", _camera_orthographic_size_spin.value)))
+
+	var material_settings := ProfileStore.dictionary_value(profile, "material")
+	if not material_settings.is_empty():
+		_material_path_edit.text = str(material_settings.get("material_path", _material_path_edit.text)).strip_edges()
+		_texture_path_edit.text = str(material_settings.get("texture_path", _texture_path_edit.text)).strip_edges()
+
+	var background_settings := ProfileStore.dictionary_value(profile, "background")
+	if not background_settings.is_empty():
+		_transparent_background_check.button_pressed = bool(background_settings.get("transparent", _transparent_background_check.button_pressed))
+		_background_color_picker.color = ProfileStore.color_value(background_settings, "color", _background_color_picker.color)
+
+	var export_settings := ProfileStore.dictionary_value(profile, "export")
+	if not export_settings.is_empty():
+		_frame_width_spin.set_value_no_signal(float(export_settings.get("frame_width", _frame_width_spin.value)))
+		_frame_height_spin.set_value_no_signal(float(export_settings.get("frame_height", _frame_height_spin.value)))
+		_frame_count_spin.set_value_no_signal(float(export_settings.get("frame_count", _frame_count_spin.value)))
+		_columns_spin.set_value_no_signal(float(export_settings.get("columns", _columns_spin.value)))
+		_frame_spacing_spin.set_value_no_signal(float(export_settings.get("frame_spacing", _frame_spacing_spin.value)))
+		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
+		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
+		if _name_pattern_edit.text.is_empty():
+			_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
+
+	_sync_object_from_controls()
+	_sync_camera_from_controls()
+	_update_background()
+	_update_export_frame_overlay()
+	_apply_material_settings(false)
 
 
 func _reset_object_transform() -> void:
@@ -686,7 +943,6 @@ func _update_export_frame_overlay() -> void:
 
 func _collect_export_settings() -> Dictionary:
 	return {
-		"source_path": _source_path_edit.text.strip_edges(),
 		"frame_width": int(round(_frame_width_spin.value)),
 		"frame_height": int(round(_frame_height_spin.value)),
 		"frame_count": int(round(_frame_count_spin.value)),
@@ -697,16 +953,52 @@ func _collect_export_settings() -> Dictionary:
 		"output_path": _output_path_edit.text.strip_edges(),
 		"output_format": "png",
 		"export_individual_frames": _export_individual_frames_check.button_pressed,
+		"name_pattern": _name_pattern_edit.text.strip_edges(),
 	}
 
 
+func _normalize_profile_path(path: String) -> String:
+	return ProfileStore.normalize_path(path)
+
+
+func _get_selected_projection_name() -> String:
+	var projection_id := _camera_projection_option.get_item_id(_camera_projection_option.selected)
+	if projection_id == Camera3D.PROJECTION_ORTHOGONAL:
+		return "orthographic"
+
+	return "perspective"
+
+
+func _projection_id_from_value(value: Variant) -> int:
+	if value is int or value is float:
+		return int(value)
+
+	var projection_name := str(value).to_lower()
+	if projection_name == "orthographic" or projection_name == "orthogonal":
+		return Camera3D.PROJECTION_ORTHOGONAL
+
+	return Camera3D.PROJECTION_PERSPECTIVE
+
+
+func _select_projection_id(projection_id: int) -> void:
+	for index in range(_camera_projection_option.get_item_count()):
+		if _camera_projection_option.get_item_id(index) == projection_id:
+			_camera_projection_option.select(index)
+			return
+
+	_camera_projection_option.select(0)
+
+
 func _validate_export_settings() -> Dictionary:
-	var validation := Exporter.validate_export_settings(_collect_export_settings(), is_instance_valid(_loaded_source))
+	return ExportPlan.build(_collect_export_settings(), _source_paths, _name_pattern_edit.text)
+
+
+func _validate_export_settings_for(settings: Dictionary, has_loaded_source: bool, require_visible_mesh := true) -> Dictionary:
+	var validation := Exporter.validate_export_settings(settings, has_loaded_source)
 	if not validation.ok:
 		return validation
 
-	var bounds := _calculate_model_bounds()
-	if not bounds.has_value:
+	if require_visible_mesh and not _calculate_model_bounds().has_value:
 		return {
 			"ok": false,
 			"message": "No visible mesh found in source asset before export.",
@@ -715,36 +1007,53 @@ func _validate_export_settings() -> Dictionary:
 	return validation
 
 
-func _export_static_sprite_sheet() -> void:
+func _export_sprite_sheets() -> void:
 	var validation := _validate_export_settings()
 	if not validation.ok:
 		_set_export_result(validation.message, true)
 		return
 
-	var settings: Dictionary = validation.settings
+	var export_items: Array = validation.items
 	_is_exporting = true
 	_export_button.disabled = true
-	_set_export_result("Rendering static preview frame...", false)
-	_sync_camera_from_controls()
-	_update_background()
+	var exported_file_count := 0
+	var output_dir := str(export_items[0]["output_path"]).get_base_dir()
 
-	var frame_size := Vector2i(int(settings["frame_width"]), int(settings["frame_height"]))
-	var capture_result: Dictionary = await Capture.capture_scene(_scene_root, frame_size, bool(settings["transparent_background"]))
-	if not capture_result.ok:
-		_finish_export(capture_result.message, true)
-		return
+	for index in range(export_items.size()):
+		var settings: Dictionary = export_items[index]
+		var source_path := str(settings["source_path"])
+		var source_name := source_path.get_file()
+		_set_export_result("Rendering %d/%d: %s" % [index + 1, export_items.size(), source_name], false)
 
-	var export_result := _write_static_export(capture_result.image, settings)
-	if not export_result.ok:
-		_finish_export(export_result.message, true)
-		return
+		var load_result := _preview_source(source_path)
+		if not load_result.ok:
+			_finish_export("Export failed for %s: %s" % [source_name, load_result.message], true)
+			return
 
-	var message := "%s Sheet size: %dx%d." % [
-		export_result.message,
-		export_result.sheet_size.x,
-		export_result.sheet_size.y,
-	]
-	_finish_export(message, false)
+		var loaded_validation := _validate_export_settings_for(settings, is_instance_valid(_loaded_source))
+		if not loaded_validation.ok:
+			_finish_export("Export failed for %s: %s" % [source_name, loaded_validation.message], true)
+			return
+
+		settings = loaded_validation.settings
+		_sync_camera_from_controls()
+		_update_background()
+
+		var frame_size := Vector2i(int(settings["frame_width"]), int(settings["frame_height"]))
+		var capture_result: Dictionary = await Capture.capture_scene(_scene_root, frame_size, bool(settings["transparent_background"]))
+		if not capture_result.ok:
+			_finish_export("Export failed for %s: %s" % [source_name, capture_result.message], true)
+			return
+
+		var export_result := _write_static_export(capture_result.image, settings)
+		if not export_result.ok:
+			_finish_export("Export failed for %s: %s" % [source_name, export_result.message], true)
+			return
+
+		var exported_paths: PackedStringArray = export_result.paths
+		exported_file_count += exported_paths.size()
+
+	_finish_export("Exported %d source model(s) to %s (%d PNG file(s))." % [export_items.size(), output_dir, exported_file_count], false)
 
 
 func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictionary:
@@ -767,6 +1076,22 @@ func _finish_export(message: String, is_error: bool) -> void:
 func _set_export_result(message: String, is_error: bool) -> void:
 	_export_result_label.text = message
 	_set_status(message, is_error)
+
+
+func _profile_success(message: String) -> Dictionary:
+	_set_status(message, false)
+	return {
+		"ok": true,
+		"message": message,
+	}
+
+
+func _profile_failure(message: String, is_error: bool) -> Dictionary:
+	_set_status(message, is_error)
+	return {
+		"ok": false,
+		"message": message,
+	}
 
 
 func _set_status(message: String, is_error: bool) -> void:
