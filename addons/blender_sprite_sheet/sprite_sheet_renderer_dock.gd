@@ -28,6 +28,7 @@ const PROFILE_FORMAT := ProfileStore.FORMAT
 const PROFILE_VERSION := ProfileStore.VERSION
 
 var _source_path_edit: LineEdit
+var _models_folder_edit: LineEdit
 var _profile_path_edit: LineEdit
 var _material_path_edit: LineEdit
 var _texture_path_edit: LineEdit
@@ -36,9 +37,11 @@ var _source_add_button: Button
 var _source_reload_button: Button
 var _source_remove_button: Button
 var _source_clear_button: Button
+var _models_recursive_check: CheckBox
 var _name_pattern_edit: LineEdit
 var _status_label: Label
 var _source_file_dialog: EditorFileDialog
+var _models_folder_dialog: EditorFileDialog
 var _profile_open_dialog: EditorFileDialog
 var _profile_save_dialog: EditorFileDialog
 var _material_file_dialog: EditorFileDialog
@@ -85,6 +88,7 @@ var _loaded_source: Node
 var _animation_player: AnimationPlayer
 var _animation_player_path := NodePath()
 var _active_profile: Dictionary = {}
+var _model_entries: Array[Dictionary] = []
 var _source_paths := PackedStringArray()
 var _is_exporting := false
 var _is_animation_playing := false
@@ -161,6 +165,33 @@ func _create_source_controls() -> Control:
 	var container := VBoxContainer.new()
 	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
+	var folder_row := HBoxContainer.new()
+	folder_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	folder_row.add_child(ControlFactory.create_row_label("Folder"))
+
+	_models_folder_edit = LineEdit.new()
+	_models_folder_edit.placeholder_text = "res://models"
+	_models_folder_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_models_folder_edit.text_submitted.connect(_on_models_folder_submitted)
+	folder_row.add_child(_models_folder_edit)
+
+	var folder_browse_button := Button.new()
+	folder_browse_button.text = "Browse..."
+	folder_browse_button.tooltip_text = "Choose a folder to scan for supported 3D assets."
+	folder_browse_button.pressed.connect(_on_models_folder_browse_pressed)
+	folder_row.add_child(folder_browse_button)
+
+	var folder_import_button := Button.new()
+	folder_import_button.text = "Import"
+	folder_import_button.tooltip_text = "Load the supported models from the folder into the list."
+	folder_import_button.pressed.connect(_import_models_from_folder)
+	folder_row.add_child(folder_import_button)
+	container.add_child(folder_row)
+
+	_models_recursive_check = CheckBox.new()
+	_models_recursive_check.text = "Recursive"
+	container.add_child(_models_recursive_check)
+
 	_source_list = ItemList.new()
 	_source_list.custom_minimum_size = Vector2(0.0, 112.0)
 	_source_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -226,7 +257,7 @@ func _create_profile_controls() -> Control:
 	path_row.add_child(ControlFactory.create_row_label("Config"))
 
 	_profile_path_edit = LineEdit.new()
-	_profile_path_edit.placeholder_text = "res://sprite_sheet_profile.json"
+	_profile_path_edit.placeholder_text = "res://sprite_sheet_config.json"
 	_profile_path_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_profile_path_edit.text_submitted.connect(_on_profile_path_submitted)
 	path_row.add_child(_profile_path_edit)
@@ -241,13 +272,13 @@ func _create_profile_controls() -> Control:
 	action_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var load_button := Button.new()
-	load_button.text = "Load Profile"
+	load_button.text = "Load Config"
 	load_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	load_button.pressed.connect(_on_load_profile_pressed)
 	action_row.add_child(load_button)
 
 	var save_button := Button.new()
-	save_button.text = "Save Profile"
+	save_button.text = "Save Config"
 	save_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	save_button.pressed.connect(_on_save_profile_pressed)
 	action_row.add_child(save_button)
@@ -434,7 +465,7 @@ func _create_object_controls() -> Control:
 func _create_settings_controls() -> Control:
 	var container := VBoxContainer.new()
 	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_add_plain_group(container, "Profile", _create_profile_controls())
+	_add_plain_group(container, "Config", _create_profile_controls())
 	_add_plain_group(container, "Material", _create_material_controls())
 	_add_plain_group(container, "Background", _create_background_controls())
 	return container
@@ -583,15 +614,22 @@ func _create_file_dialogs() -> void:
 	_source_file_dialog.files_selected.connect(_on_source_files_selected)
 	add_child(_source_file_dialog)
 
-	_profile_open_dialog = _create_file_dialog("Load Sprite Sheet Profile", _on_profile_file_selected)
-	_profile_open_dialog.add_filter("*.json ; Sprite sheet profile")
+	_models_folder_dialog = EditorFileDialog.new()
+	_models_folder_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
+	_models_folder_dialog.access = EditorFileDialog.ACCESS_RESOURCES
+	_models_folder_dialog.title = "Select Models Folder"
+	_models_folder_dialog.dir_selected.connect(_on_models_folder_selected)
+	add_child(_models_folder_dialog)
+
+	_profile_open_dialog = _create_file_dialog("Load Sprite Sheet Config", _on_profile_file_selected)
+	_profile_open_dialog.add_filter("*.json ; Sprite sheet config")
 	add_child(_profile_open_dialog)
 
 	_profile_save_dialog = EditorFileDialog.new()
 	_profile_save_dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
 	_profile_save_dialog.access = EditorFileDialog.ACCESS_RESOURCES
-	_profile_save_dialog.title = "Save Sprite Sheet Profile"
-	_profile_save_dialog.add_filter("*.json ; Sprite sheet profile")
+	_profile_save_dialog.title = "Save Sprite Sheet Config"
+	_profile_save_dialog.add_filter("*.json ; Sprite sheet config")
 	_profile_save_dialog.file_selected.connect(_on_profile_save_file_selected)
 	add_child(_profile_save_dialog)
 
@@ -632,6 +670,20 @@ func _build_preview_scene() -> void:
 func _on_browse_pressed() -> void:
 	if _source_file_dialog:
 		_source_file_dialog.popup_centered_ratio(0.75)
+
+
+func _on_models_folder_browse_pressed() -> void:
+	if _models_folder_dialog:
+		_models_folder_dialog.current_dir = _models_folder_edit.text
+		_models_folder_dialog.popup_centered_ratio(0.75)
+
+
+func _on_models_folder_selected(path: String) -> void:
+	_models_folder_edit.text = path.strip_edges()
+
+
+func _on_models_folder_submitted(path: String) -> void:
+	_models_folder_edit.text = path.strip_edges()
 
 
 func _on_source_files_selected(paths: PackedStringArray) -> void:
@@ -764,9 +816,7 @@ func _on_export_pressed() -> void:
 
 
 func _load_source(path: String) -> Dictionary:
-	var paths := PackedStringArray()
-	paths.append(path)
-	return _set_source_paths(paths)
+	return _set_model_entries([_make_model_entry(path, _material_path_edit.text, _texture_path_edit.text)], 0)
 
 
 func _preview_source(path: String) -> Dictionary:
@@ -794,11 +844,19 @@ func _preview_source(path: String) -> Dictionary:
 
 	_fit_model_to_preview(bounds.aabb)
 	bounds = _calculate_model_bounds()
+	var model_index := _find_model_entry_index(load_result.path)
+	if model_index != -1:
+		_sync_model_controls_from_entry_index(model_index)
 	_apply_material_settings(false)
 	_frame_bounds(bounds.aabb)
 	_refresh_animation_controls()
+	_apply_active_animation_settings()
 	if not _active_profile.is_empty():
-		_apply_profile_settings(_active_profile)
+		_apply_scene_settings(_active_profile)
+		var selected_index := _get_selected_source_index()
+		if selected_index != -1:
+			_sync_model_controls_from_entry_index(selected_index)
+			_apply_material_settings(false)
 	var message := "Loaded \"%s\"." % (load_result.path as String).get_file()
 	_source_path_edit.text = load_result.path
 	_set_status(message, false)
@@ -809,9 +867,10 @@ func _preview_source(path: String) -> Dictionary:
 	}
 
 
-func _set_source_paths(paths: PackedStringArray, preview_first := true) -> Dictionary:
-	_source_paths = SourceSelection.normalize_paths(paths)
-	_update_source_list(0 if preview_first else -1)
+func _set_model_entries(entries: Array[Dictionary], preview_index := -1) -> Dictionary:
+	_model_entries = _normalize_model_entries(entries)
+	_source_paths = _model_paths_from_entries(_model_entries)
+	_update_source_list(preview_index)
 
 	if _source_paths.is_empty():
 		_clear_loaded_source()
@@ -828,8 +887,9 @@ func _set_source_paths(paths: PackedStringArray, preview_first := true) -> Dicti
 		"ok": true,
 		"message": "",
 	}
-	if preview_first:
-		load_result = _preview_source(_source_paths[0])
+	if preview_index >= 0 and preview_index < _source_paths.size():
+		_sync_model_controls_from_entry_index(preview_index)
+		load_result = _preview_source(_source_paths[preview_index])
 		if not load_result.ok:
 			return load_result
 
@@ -839,8 +899,16 @@ func _set_source_paths(paths: PackedStringArray, preview_first := true) -> Dicti
 	return load_result
 
 
+func _set_source_paths(paths: PackedStringArray, preview_first := true) -> Dictionary:
+	var entries: Array[Dictionary] = []
+	for source_path in SourceSelection.normalize_paths(paths):
+		entries.append(_make_model_entry(source_path, _material_path_edit.text, _texture_path_edit.text))
+
+	return _set_model_entries(entries, 0 if preview_first and not entries.is_empty() else -1)
+
+
 func _clear_sources() -> void:
-	_set_source_paths(PackedStringArray(), false)
+	_set_model_entries([], -1)
 
 
 func _add_source_from_entry() -> Dictionary:
@@ -863,33 +931,21 @@ func _add_source_paths(paths: PackedStringArray) -> Dictionary:
 			"message": message,
 		}
 
-	var merged_paths := PackedStringArray()
-	for source_path in _source_paths:
-		merged_paths.append(source_path)
-
+	var merged_entries: Array[Dictionary] = _model_entries.duplicate(true)
 	var selected_index := -1
 	for source_path in normalized_paths:
-		var existing_index := merged_paths.find(source_path)
+		var existing_index := _find_model_entry_index(source_path)
 		if existing_index == -1:
-			merged_paths.append(source_path)
+			merged_entries.append(_make_model_entry(source_path, _material_path_edit.text, _texture_path_edit.text))
 			if selected_index == -1:
-				selected_index = merged_paths.size() - 1
+				selected_index = merged_entries.size() - 1
 		elif selected_index == -1:
 			selected_index = existing_index
 
-	_source_paths = SourceSelection.normalize_paths(merged_paths)
-	if selected_index == -1 and not _source_paths.is_empty():
+	if selected_index == -1 and not merged_entries.is_empty():
 		selected_index = 0
 
-	_update_source_list(selected_index)
-	var load_result := _preview_source(_source_paths[selected_index])
-	if not load_result.ok:
-		return load_result
-
-	if _source_paths.size() > 1:
-		_set_status("Selected %s." % _format_source_count(_source_paths.size()), false)
-
-	return load_result
+	return _set_model_entries(merged_entries, selected_index)
 
 
 func _remove_selected_source() -> void:
@@ -899,20 +955,18 @@ func _remove_selected_source() -> void:
 		return
 
 	var removed_path := _source_paths[selected_index]
-	var remaining_paths := PackedStringArray()
-	for index in range(_source_paths.size()):
+	var remaining_entries: Array[Dictionary] = []
+	for index in range(_model_entries.size()):
 		if index != selected_index:
-			remaining_paths.append(_source_paths[index])
+			remaining_entries.append(_model_entries[index].duplicate(true))
 
-	if remaining_paths.is_empty():
-		_set_source_paths(remaining_paths, false)
+	if remaining_entries.is_empty():
+		_set_model_entries(remaining_entries, -1)
 		_set_status("Removed \"%s\". Add a model to preview." % removed_path.get_file(), false)
 		return
 
-	_source_paths = remaining_paths
-	var next_index := mini(selected_index, _source_paths.size() - 1)
-	_update_source_list(next_index)
-	var load_result := _preview_source(_source_paths[next_index])
+	var next_index := mini(selected_index, remaining_entries.size() - 1)
+	var load_result := _set_model_entries(remaining_entries, next_index)
 	if load_result.ok:
 		_set_status("Removed \"%s\". Selected %s." % [removed_path.get_file(), _format_source_count(_source_paths.size())], false)
 
@@ -929,6 +983,7 @@ func _select_source_index(index: int) -> void:
 	_source_list.deselect_all()
 	if index >= 0 and index < _source_paths.size():
 		_source_list.select(index)
+		_sync_model_controls_from_entry_index(index)
 
 	_update_source_actions()
 
@@ -968,6 +1023,129 @@ func _update_source_actions() -> void:
 		_source_clear_button.disabled = not has_sources
 
 
+func _set_model_entry_paths_from_controls(entry_index: int) -> void:
+	if entry_index < 0 or entry_index >= _model_entries.size():
+		return
+
+	var entry: Dictionary = _model_entries[entry_index]
+	entry["material_path"] = _material_path_edit.text.strip_edges()
+	entry["texture_path"] = _texture_path_edit.text.strip_edges()
+	_model_entries[entry_index] = entry
+
+
+func _sync_model_controls_from_entry_index(entry_index: int) -> void:
+	if entry_index < 0 or entry_index >= _model_entries.size():
+		return
+
+	var entry: Dictionary = _model_entries[entry_index]
+	_material_path_edit.text = str(entry.get("material_path", _material_path_edit.text)).strip_edges()
+	_texture_path_edit.text = str(entry.get("texture_path", _texture_path_edit.text)).strip_edges()
+
+
+func _make_model_entry(path: String, material_path := "", texture_path := "") -> Dictionary:
+	return {
+		"path": path.strip_edges(),
+		"material_path": str(material_path).strip_edges(),
+		"texture_path": str(texture_path).strip_edges(),
+	}
+
+
+func _normalize_model_entries(entries: Array[Dictionary]) -> Array[Dictionary]:
+	var normalized_entries: Array[Dictionary] = []
+	for entry in entries:
+		if not (entry is Dictionary):
+			continue
+
+		var path := str(entry.get("path", entry.get("source_path", ""))).strip_edges()
+		if path.is_empty():
+			continue
+
+		normalized_entries.append(_make_model_entry(
+			path,
+			entry.get("material_path", entry.get("material", _material_path_edit.text)),
+			entry.get("texture_path", entry.get("texture", _texture_path_edit.text))
+		))
+
+	return _merge_model_entries(normalized_entries)
+
+
+func _merge_model_entries(entries: Array[Dictionary]) -> Array[Dictionary]:
+	var ordered_paths: Array[String] = []
+	var entries_by_path := {}
+
+	for entry in entries:
+		var path := str(entry.get("path", "")).strip_edges()
+		if path.is_empty():
+			continue
+
+		if not entries_by_path.has(path):
+			ordered_paths.append(path)
+		entries_by_path[path] = entry
+
+	var merged: Array[Dictionary] = []
+	for path in ordered_paths:
+		merged.append(entries_by_path[path])
+
+	return merged
+
+
+func _model_paths_from_entries(entries: Array[Dictionary]) -> PackedStringArray:
+	var paths := PackedStringArray()
+	for entry in entries:
+		var path := str(entry.get("path", "")).strip_edges()
+		if path.is_empty():
+			continue
+		paths.append(path)
+
+	return SourceSelection.normalize_paths(paths)
+
+
+func _find_model_entry_index(path: String) -> int:
+	var selected_path := path.strip_edges()
+	if selected_path.is_empty():
+		return -1
+
+	for index in range(_model_entries.size()):
+		if str(_model_entries[index].get("path", "")) == selected_path:
+			return index
+
+	return -1
+
+
+func _import_models_from_folder() -> Dictionary:
+	var folder_path := _models_folder_edit.text.strip_edges()
+	if folder_path.is_empty():
+		var message := "Choose a models folder before importing."
+		_set_status(message, true)
+		return {
+			"ok": false,
+			"message": message,
+		}
+
+	if not ProfileStore.directory_exists(folder_path):
+		var message := "Models folder doesn't exist: \"%s\"." % folder_path
+		_set_status(message, true)
+		return {
+			"ok": false,
+			"message": message,
+		}
+
+	var paths := ProfileStore.collect_source_paths_from_folder(folder_path, _models_recursive_check.button_pressed)
+	if paths.is_empty():
+		var message := "No supported 3D assets were found in \"%s\"." % folder_path
+		_set_status(message, true)
+		return {
+			"ok": false,
+			"message": message,
+		}
+
+	var entries: Array[Dictionary] = []
+	for path in paths:
+		entries.append(_make_model_entry(path, _material_path_edit.text, _texture_path_edit.text))
+
+	return _set_model_entries(entries, 0)
+
+
 func _instantiate_resource(resource: Resource) -> Node:
 	return SourceLoader.instantiate_resource(resource)
 
@@ -1001,6 +1179,7 @@ func _apply_material_settings(show_status := true) -> void:
 			_set_status("Load a source asset before applying material settings.", true)
 		return
 
+	_set_model_entry_paths_from_controls(_get_selected_source_index())
 	var result := MaterialApplier.apply_to_model(_model_root, _material_path_edit.text, _texture_path_edit.text)
 	if show_status:
 		_set_status(result.message, not result.ok)
@@ -1060,9 +1239,9 @@ func _load_profile(path: String) -> Dictionary:
 		return _profile_failure(result.message, true)
 
 	var profile: Dictionary = result.profile
+	_active_profile = profile.duplicate(true)
 	_apply_profile_settings(profile)
 	_profile_path_edit.text = result.path
-	_active_profile = profile.duplicate(true)
 	return _profile_success(result.message)
 
 
@@ -1070,10 +1249,26 @@ func _collect_profile_settings() -> Dictionary:
 	return {
 		"format": PROFILE_FORMAT,
 		"version": PROFILE_VERSION,
-		"object": {
-			"position": ProfileStore.vector3_to_array(CameraController.get_vector3_from_controls(_object_position_controls)),
-			"rotation_degrees": ProfileStore.vector3_to_array(CameraController.get_vector3_from_controls(_object_rotation_controls)),
+		"models": {
+			"folder": _models_folder_edit.text.strip_edges(),
+			"recursive": _models_recursive_check.button_pressed if _models_recursive_check != null else false,
+			"items": _collect_model_entries(),
 		},
+		"object": _collect_object_settings(),
+		"settings": _collect_scene_settings(),
+		"export": _collect_export_settings(),
+	}
+
+
+func _collect_object_settings() -> Dictionary:
+	return {
+		"position": ProfileStore.vector3_to_array(CameraController.get_vector3_from_controls(_object_position_controls)),
+		"rotation_degrees": ProfileStore.vector3_to_array(CameraController.get_vector3_from_controls(_object_rotation_controls)),
+	}
+
+
+func _collect_scene_settings() -> Dictionary:
+	return {
 		"camera": {
 			"projection": _get_selected_projection_name(),
 			"fov": _camera_fov_spin.value,
@@ -1091,25 +1286,35 @@ func _collect_profile_settings() -> Dictionary:
 			"name": _get_selected_animation_name(),
 			"avoid_duplicate_loop_frame": _avoid_duplicate_loop_frame_check.button_pressed,
 		},
-		"export": {
-			"frame_width": int(round(_frame_width_spin.value)),
-			"frame_height": int(round(_frame_height_spin.value)),
-			"frame_count": int(round(_frame_count_spin.value)),
-			"columns": int(round(_columns_spin.value)),
-			"frame_spacing": int(round(_frame_spacing_spin.value)),
-			"msaa_3d": _get_option_id(_msaa_option, RenderOptions.DEFAULT_MSAA_3D),
-			"screen_space_aa": _get_option_id(_screen_space_aa_option, RenderOptions.DEFAULT_SCREEN_SPACE_AA),
-			"use_taa": _taa_check.button_pressed,
-			"supersample_scale": _get_option_id(_supersample_option, RenderOptions.DEFAULT_SUPERSAMPLE_SCALE),
-			"resize_filter": _get_option_id(_resize_filter_option, RenderOptions.DEFAULT_RESIZE_FILTER),
-			"anisotropic_filtering": _get_option_id(_anisotropic_filtering_option, RenderOptions.DEFAULT_ANISOTROPIC_FILTERING),
-			"export_individual_frames": _export_individual_frames_check.button_pressed,
-			"name_pattern": _name_pattern_edit.text.strip_edges(),
-		},
 	}
 
 
-func _apply_profile_settings(profile: Dictionary) -> void:
+func _collect_model_entries() -> Array[Dictionary]:
+	_set_model_entry_paths_from_controls(_get_selected_source_index())
+	var entries := _model_entries.duplicate(true)
+	if entries.is_empty():
+		for source_path in _source_paths:
+			entries.append(_make_model_entry(source_path, _material_path_edit.text, _texture_path_edit.text))
+
+	var normalized_entries: Array[Dictionary] = []
+	for entry in entries:
+		if not (entry is Dictionary):
+			continue
+
+		var path := str(entry.get("path", "")).strip_edges()
+		if path.is_empty():
+			continue
+
+		normalized_entries.append({
+			"path": path,
+			"material_path": str(entry.get("material_path", _material_path_edit.text)).strip_edges(),
+			"texture_path": str(entry.get("texture_path", _texture_path_edit.text)).strip_edges(),
+		})
+
+	return normalized_entries
+
+
+func _apply_scene_settings(profile: Dictionary) -> void:
 	var object_settings := ProfileStore.dictionary_value(profile, "object")
 	if object_settings.is_empty():
 		object_settings = profile
@@ -1120,24 +1325,110 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		_set_vector3_controls(_object_position_controls, position)
 		_set_vector3_controls(_object_rotation_controls, rotation)
 
-	var camera_settings := ProfileStore.dictionary_value(profile, "camera")
+	var settings_section := ProfileStore.dictionary_value(profile, "settings")
+	if settings_section.is_empty():
+		settings_section = profile
+
+	var camera_settings := ProfileStore.dictionary_value(settings_section, "camera")
+	if camera_settings.is_empty():
+		camera_settings = ProfileStore.dictionary_value(profile, "camera")
 	if not camera_settings.is_empty():
 		var projection_id := _projection_id_from_value(camera_settings.get("projection", _get_selected_projection_name()))
 		_select_projection_id(projection_id)
 		_camera_fov_spin.set_value_no_signal(float(camera_settings.get("fov", _camera_fov_spin.value)))
 		_camera_orthographic_size_spin.set_value_no_signal(float(camera_settings.get("orthographic_size", _camera_orthographic_size_spin.value)))
 
-	var material_settings := ProfileStore.dictionary_value(profile, "material")
-	if not material_settings.is_empty():
-		_material_path_edit.text = str(material_settings.get("material_path", _material_path_edit.text)).strip_edges()
-		_texture_path_edit.text = str(material_settings.get("texture_path", _texture_path_edit.text)).strip_edges()
-
-	var background_settings := ProfileStore.dictionary_value(profile, "background")
+	var background_settings := ProfileStore.dictionary_value(settings_section, "background")
+	if background_settings.is_empty():
+		background_settings = ProfileStore.dictionary_value(profile, "background")
 	if not background_settings.is_empty():
 		_transparent_background_check.button_pressed = bool(background_settings.get("transparent", _transparent_background_check.button_pressed))
 		_background_color_picker.color = ProfileStore.color_value(background_settings, "color", _background_color_picker.color)
 
-	var animation_settings := ProfileStore.dictionary_value(profile, "animation")
+	var animation_settings := ProfileStore.dictionary_value(settings_section, "animation")
+	if animation_settings.is_empty():
+		animation_settings = ProfileStore.dictionary_value(profile, "animation")
+	if not animation_settings.is_empty():
+		_avoid_duplicate_loop_frame_check.button_pressed = bool(animation_settings.get("avoid_duplicate_loop_frame", _avoid_duplicate_loop_frame_check.button_pressed))
+		_select_animation_by_name(str(animation_settings.get("name", "")))
+
+	var export_settings := ProfileStore.dictionary_value(profile, "export")
+	if not export_settings.is_empty():
+		_frame_width_spin.set_value_no_signal(float(export_settings.get("frame_width", _frame_width_spin.value)))
+		_frame_height_spin.set_value_no_signal(float(export_settings.get("frame_height", _frame_height_spin.value)))
+		_frame_count_spin.set_value_no_signal(float(export_settings.get("frame_count", _frame_count_spin.value)))
+		_columns_spin.set_value_no_signal(float(export_settings.get("columns", _columns_spin.value)))
+		_frame_spacing_spin.set_value_no_signal(float(export_settings.get("frame_spacing", _frame_spacing_spin.value)))
+		var render_settings := RenderOptions.normalize(export_settings)
+		ControlFactory.select_option_by_id(_msaa_option, int(render_settings["msaa_3d"]))
+		ControlFactory.select_option_by_id(_screen_space_aa_option, int(render_settings["screen_space_aa"]))
+		_taa_check.button_pressed = bool(render_settings["use_taa"])
+		ControlFactory.select_option_by_id(_supersample_option, int(render_settings["supersample_scale"]))
+		ControlFactory.select_option_by_id(_resize_filter_option, int(render_settings["resize_filter"]))
+		ControlFactory.select_option_by_id(_anisotropic_filtering_option, int(render_settings["anisotropic_filtering"]))
+		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
+		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
+		if _name_pattern_edit.text.is_empty():
+			_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
+
+	_sync_object_from_controls()
+	_sync_camera_from_controls()
+	_update_background()
+	_update_render_options()
+	_update_export_frame_overlay()
+	_update_animation_frame_label()
+
+
+func _apply_profile_settings(profile: Dictionary) -> void:
+	var settings_section := ProfileStore.dictionary_value(profile, "settings")
+	if settings_section.is_empty():
+		settings_section = profile
+
+	var model_defaults := ProfileStore.dictionary_value(settings_section, "material")
+	if model_defaults.is_empty():
+		model_defaults = ProfileStore.dictionary_value(profile, "material")
+	if not model_defaults.is_empty():
+		_material_path_edit.text = str(model_defaults.get("material_path", _material_path_edit.text)).strip_edges()
+		_texture_path_edit.text = str(model_defaults.get("texture_path", _texture_path_edit.text)).strip_edges()
+
+	var models_folder := ProfileStore.get_model_folder(profile)
+	if _models_folder_edit:
+		_models_folder_edit.text = models_folder
+	if _models_recursive_check:
+		_models_recursive_check.button_pressed = ProfileStore.get_model_recursive(profile)
+
+	var model_entries := ProfileStore.get_model_entries(profile)
+	_set_model_entries(model_entries, 0 if not model_entries.is_empty() else -1)
+
+	var object_settings := ProfileStore.dictionary_value(profile, "object")
+	if object_settings.is_empty():
+		object_settings = profile
+
+	if ProfileStore.has_any_key(object_settings, ProfileStore.POSITION_KEYS) or ProfileStore.has_any_key(object_settings, ProfileStore.ROTATION_KEYS):
+		var position := ProfileStore.vector3_any(object_settings, ProfileStore.POSITION_KEYS, CameraController.get_vector3_from_controls(_object_position_controls))
+		var rotation := ProfileStore.vector3_any(object_settings, ProfileStore.ROTATION_KEYS, CameraController.get_vector3_from_controls(_object_rotation_controls))
+		_set_vector3_controls(_object_position_controls, position)
+		_set_vector3_controls(_object_rotation_controls, rotation)
+
+	var camera_settings := ProfileStore.dictionary_value(settings_section, "camera")
+	if camera_settings.is_empty():
+		camera_settings = ProfileStore.dictionary_value(profile, "camera")
+	if not camera_settings.is_empty():
+		var projection_id := _projection_id_from_value(camera_settings.get("projection", _get_selected_projection_name()))
+		_select_projection_id(projection_id)
+		_camera_fov_spin.set_value_no_signal(float(camera_settings.get("fov", _camera_fov_spin.value)))
+		_camera_orthographic_size_spin.set_value_no_signal(float(camera_settings.get("orthographic_size", _camera_orthographic_size_spin.value)))
+
+	var background_settings := ProfileStore.dictionary_value(settings_section, "background")
+	if background_settings.is_empty():
+		background_settings = ProfileStore.dictionary_value(profile, "background")
+	if not background_settings.is_empty():
+		_transparent_background_check.button_pressed = bool(background_settings.get("transparent", _transparent_background_check.button_pressed))
+		_background_color_picker.color = ProfileStore.color_value(background_settings, "color", _background_color_picker.color)
+
+	var animation_settings := ProfileStore.dictionary_value(settings_section, "animation")
+	if animation_settings.is_empty():
+		animation_settings = ProfileStore.dictionary_value(profile, "animation")
 	if not animation_settings.is_empty():
 		_avoid_duplicate_loop_frame_check.button_pressed = bool(animation_settings.get("avoid_duplicate_loop_frame", _avoid_duplicate_loop_frame_check.button_pressed))
 		_select_animation_by_name(str(animation_settings.get("name", "")))
@@ -1168,6 +1459,24 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 	_update_export_frame_overlay()
 	_update_animation_frame_label()
 	_apply_material_settings(false)
+
+
+func _apply_active_animation_settings() -> void:
+	if _active_profile.is_empty():
+		return
+
+	var settings_section := ProfileStore.dictionary_value(_active_profile, "settings")
+	if settings_section.is_empty():
+		settings_section = _active_profile
+
+	var animation_settings := ProfileStore.dictionary_value(settings_section, "animation")
+	if animation_settings.is_empty():
+		animation_settings = ProfileStore.dictionary_value(_active_profile, "animation")
+	if animation_settings.is_empty():
+		return
+
+	_avoid_duplicate_loop_frame_check.button_pressed = bool(animation_settings.get("avoid_duplicate_loop_frame", _avoid_duplicate_loop_frame_check.button_pressed))
+	_select_animation_by_name(str(animation_settings.get("name", "")))
 
 
 func _reset_object_transform() -> void:
@@ -1633,7 +1942,7 @@ func _load_source_for_export(source_path: String, export_scene_settings: Diction
 	if not load_result.ok:
 		return load_result
 
-	_apply_profile_settings(export_scene_settings)
+	_apply_scene_settings(export_scene_settings)
 	return load_result
 
 

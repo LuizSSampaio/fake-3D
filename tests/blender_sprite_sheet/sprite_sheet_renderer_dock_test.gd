@@ -8,6 +8,7 @@ const AnimationUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_
 const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_frame_overlay.gd")
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
 const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
+const ProfileStore := preload("res://addons/blender_sprite_sheet/sprite_sheet_profile_store.gd")
 const VECTOR_EPSILON := Vector3(0.001, 0.001, 0.001)
 
 var _dock: VBoxContainer
@@ -261,12 +262,18 @@ func test_source_selection_deduplicates_and_previews_first_model() -> void:
 
 func test_source_controls_place_model_list_before_add_bar() -> void:
 	var source_container: Node = _dock._source_list.get_parent()
+	var folder_row: Node = _dock._models_folder_edit.get_parent()
+	var recursive_check: Node = _dock._models_recursive_check
 	var add_bar: Node = _dock._source_path_edit.get_parent()
 
 	assert_object(source_container).is_not_null()
+	assert_object(folder_row).is_not_null()
+	assert_object(recursive_check).is_not_null()
 	assert_object(add_bar).is_not_null()
-	assert_int(source_container.get_child(0).get_instance_id()).is_equal(_dock._source_list.get_instance_id())
-	assert_int(source_container.get_child(1).get_instance_id()).is_equal(add_bar.get_instance_id())
+	assert_int(source_container.get_child(0).get_instance_id()).is_equal(folder_row.get_instance_id())
+	assert_int(source_container.get_child(1).get_instance_id()).is_equal(recursive_check.get_instance_id())
+	assert_int(source_container.get_child(2).get_instance_id()).is_equal(_dock._source_list.get_instance_id())
+	assert_int(source_container.get_child(3).get_instance_id()).is_equal(add_bar.get_instance_id())
 
 
 func test_editor_panel_uses_foldable_sections_and_subsections() -> void:
@@ -510,17 +517,32 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	var object_position := Vector3(1.25, -0.5, 2.0)
 	var object_rotation := Vector3(10.0, 35.0, -15.0)
 	var background_color := Color(0.25, 0.5, 0.75, 1.0)
-	_dock._source_path_edit.text = "res://models/book.glb"
-	_dock._output_path_edit.text = "res://exports"
+	var temp_dir := _temp_resource_directory()
+	var models_dir := temp_dir.path_join("profile_save_models")
+	assert_int(DirAccess.make_dir_recursive_absolute(models_dir)).is_equal(OK)
+	var first_source_path := _save_test_scene_at_path(models_dir.path_join("book.tscn"))
+	var second_source_path := _save_test_scene_at_path(models_dir.path_join("nested/companion.tscn"))
+
+	_dock._models_folder_edit.text = models_dir
+	_dock._models_recursive_check.button_pressed = true
+	_dock._load_source(first_source_path)
 	_dock._material_path_edit.text = "res://materials/book.tres"
 	_dock._texture_path_edit.text = "res://textures/book.png"
+	_dock._apply_material_settings()
+	_dock._transparent_background_check.button_pressed = false
+	_dock._background_color_picker.color = background_color
+	_dock._source_path_edit.text = second_source_path
+	_dock._material_path_edit.text = "res://materials/companion.tres"
+	_dock._texture_path_edit.text = "res://textures/companion.png"
+	_dock._add_source_from_entry()
 	_set_vector3_spin_values(_dock._object_position_controls, object_position)
 	_set_vector3_spin_values(_dock._object_rotation_controls, object_rotation)
 	_dock._camera_projection_option.select(1)
+	_dock._on_projection_selected(1)
 	_dock._camera_fov_spin.set_value_no_signal(45.0)
 	_dock._camera_orthographic_size_spin.set_value_no_signal(2.5)
-	_dock._transparent_background_check.button_pressed = false
-	_dock._background_color_picker.color = background_color
+	_dock._on_camera_control_changed(0.0)
+	_dock._on_object_control_changed(0.0)
 	_dock._frame_width_spin.set_value_no_signal(128.0)
 	_dock._frame_height_spin.set_value_no_signal(256.0)
 	_dock._frame_count_spin.set_value_no_signal(8.0)
@@ -545,19 +567,32 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	assert_bool(FileAccess.file_exists(profile_path)).is_true()
 	assert_str(profile.format).is_equal(SpriteSheetRendererDock.PROFILE_FORMAT)
 	assert_int(int(profile.version)).is_equal(SpriteSheetRendererDock.PROFILE_VERSION)
+	assert_bool(profile.has("models")).is_true()
+	assert_bool(profile.has("object")).is_true()
+	assert_bool(profile.has("settings")).is_true()
+	assert_bool(profile.has("export")).is_true()
 	assert_bool(profile.has("source_path")).is_false()
 	assert_bool(profile.has("output_path")).is_false()
+	assert_str(profile.models.folder).is_equal(models_dir)
+	assert_bool(bool(profile.models.recursive)).is_true()
+	assert_int(profile.models.items.size()).is_equal(2)
+	assert_str(profile.models.items[0].path).is_equal(first_source_path)
+	assert_str(profile.models.items[0].material_path).is_equal("res://materials/book.tres")
+	assert_str(profile.models.items[0].texture_path).is_equal("res://textures/book.png")
+	assert_str(profile.models.items[1].path).is_equal(second_source_path)
+	assert_str(profile.models.items[1].material_path).is_equal("res://materials/companion.tres")
+	assert_str(profile.models.items[1].texture_path).is_equal("res://textures/companion.png")
 	assert_vector(_vector3_from_array(profile.object.position)).is_equal_approx(object_position, VECTOR_EPSILON)
 	assert_vector(_vector3_from_array(profile.object.rotation_degrees)).is_equal_approx(object_rotation, VECTOR_EPSILON)
-	assert_str(profile.camera.projection).is_equal("orthographic")
-	assert_float(float(profile.camera.fov)).is_equal_approx(45.0, 0.001)
-	assert_float(float(profile.camera.orthographic_size)).is_equal_approx(2.5, 0.001)
-	assert_bool(bool(profile.background.transparent)).is_false()
-	assert_that(_color_from_array(profile.background.color)).is_equal(background_color)
-	assert_str(profile.animation.name).is_equal("")
-	assert_bool(bool(profile.animation.avoid_duplicate_loop_frame)).is_true()
-	assert_str(profile.material.material_path).is_equal("res://materials/book.tres")
-	assert_str(profile.material.texture_path).is_equal("res://textures/book.png")
+	assert_str(profile.settings.camera.projection).is_equal("orthographic")
+	assert_float(float(profile.settings.camera.fov)).is_equal_approx(45.0, 0.001)
+	assert_float(float(profile.settings.camera.orthographic_size)).is_equal_approx(2.5, 0.001)
+	assert_bool(bool(profile.settings.background.transparent)).is_false()
+	assert_that(_color_from_array(profile.settings.background.color)).is_equal(background_color)
+	assert_str(profile.settings.animation.name).is_equal("")
+	assert_bool(bool(profile.settings.animation.avoid_duplicate_loop_frame)).is_true()
+	assert_str(profile.settings.material.material_path).is_equal("res://materials/companion.tres")
+	assert_str(profile.settings.material.texture_path).is_equal("res://textures/companion.png")
 	assert_int(int(profile.export.frame_width)).is_equal(128)
 	assert_int(int(profile.export.frame_height)).is_equal(256)
 	assert_int(int(profile.export.frame_count)).is_equal(8)
@@ -577,20 +612,48 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	var object_position := Vector3(0.5, 1.0, -0.25)
 	var object_rotation := Vector3(0.0, 180.0, 15.0)
 	var background_color := Color(0.1, 0.2, 0.3, 1.0)
-	var profile_path := _temp_resource_path("loaded_profile.json")
+	var temp_dir := _temp_resource_directory()
+	var models_dir := temp_dir.path_join("profile_load_models")
+	assert_int(DirAccess.make_dir_recursive_absolute(models_dir.path_join("nested"))).is_equal(OK)
+	var first_source_path := _save_test_scene_at_path(models_dir.path_join("hero.tscn"))
+	var second_source_path := _save_test_scene_at_path(models_dir.path_join("nested/villain.tscn"))
+	var profile_path := temp_dir.path_join("loaded_profile.json")
 	_write_json_file(profile_path, {
+		"format": SpriteSheetRendererDock.PROFILE_FORMAT,
+		"version": SpriteSheetRendererDock.PROFILE_VERSION,
+		"models": {
+			"folder": models_dir,
+			"recursive": true,
+			"items": [
+				{
+					"path": second_source_path,
+					"material_path": "res://materials/villain.tres",
+					"texture_path": "res://textures/villain.png",
+				},
+			],
+		},
 		"object": {
 			"position": [object_position.x, object_position.y, object_position.z],
-			"rotation": [object_rotation.x, object_rotation.y, object_rotation.z],
+			"rotation_degrees": [object_rotation.x, object_rotation.y, object_rotation.z],
 		},
-		"camera": {
-			"projection": "orthographic",
-			"fov": 55.0,
-			"orthographic_size": 3.25,
-		},
-		"background": {
-			"transparent": false,
-			"color": [background_color.r, background_color.g, background_color.b, background_color.a],
+		"settings": {
+			"camera": {
+				"projection": "orthographic",
+				"fov": 55.0,
+				"orthographic_size": 3.25,
+			},
+			"material": {
+				"material_path": "res://materials/default.tres",
+				"texture_path": "res://textures/default.png",
+			},
+			"background": {
+				"transparent": false,
+				"color": [background_color.r, background_color.g, background_color.b, background_color.a],
+			},
+			"animation": {
+				"name": "",
+				"avoid_duplicate_loop_frame": true,
+			},
 		},
 		"export": {
 			"frame_width": 320,
@@ -612,7 +675,7 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	var result: Dictionary = _dock._load_profile(profile_path)
 
 	assert_bool(result.ok).is_true()
-	assert_str(_dock._status_label.text).is_equal("Loaded profile \"loaded_profile.json\".")
+	assert_str(_dock._status_label.text).is_equal("Loaded config \"loaded_profile.json\".")
 	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
 	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
 	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_ORTHOGONAL)
@@ -623,6 +686,17 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	assert_bool(_dock._background_color_picker.disabled).is_false()
 	assert_that(_dock._world_environment.environment.background_color).is_equal(background_color)
 	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(320, 160))
+	assert_str(_dock._models_folder_edit.text).is_equal(models_dir)
+	assert_bool(_dock._models_recursive_check.button_pressed).is_true()
+	assert_int(_dock._source_paths.size()).is_equal(2)
+	assert_str(_dock._source_paths[0]).is_equal(first_source_path)
+	assert_str(_dock._source_paths[1]).is_equal(second_source_path)
+	assert_int(_dock._model_entries.size()).is_equal(2)
+	assert_str(_dock._model_entries[1].material_path).is_equal("res://materials/villain.tres")
+	assert_str(_dock._model_entries[1].texture_path).is_equal("res://textures/villain.png")
+	_dock._select_source_index(1)
+	assert_str(_dock._material_path_edit.text).is_equal("res://materials/villain.tres")
+	assert_str(_dock._texture_path_edit.text).is_equal("res://textures/villain.png")
 	assert_int(int(_dock._frame_count_spin.value)).is_equal(6)
 	assert_int(int(_dock._columns_spin.value)).is_equal(3)
 	assert_int(int(_dock._frame_spacing_spin.value)).is_equal(4)
@@ -656,7 +730,7 @@ func test_load_profile_reports_invalid_json() -> void:
 	var result: Dictionary = _dock._load_profile(profile_path)
 
 	assert_bool(result.ok).is_false()
-	assert_str(_dock._status_label.text).contains("Profile JSON is invalid")
+	assert_str(_dock._status_label.text).contains("Config JSON is invalid")
 
 
 func test_load_profile_accepts_minimal_position_rotation_definition() -> void:
@@ -997,6 +1071,19 @@ func _save_test_scene(file_name: String) -> String:
 	var packed_scene := PackedScene.new()
 	assert_int(packed_scene.pack(root)).is_equal(OK)
 	var scene_path := _temp_resource_path(file_name)
+	assert_int(ResourceSaver.save(packed_scene, scene_path)).is_equal(OK)
+	root.free()
+	return scene_path
+
+
+func _save_test_scene_at_path(scene_path: String) -> String:
+	var root := Node3D.new()
+	root.name = "TestModel"
+	_add_mesh_instance(root, Vector3(2.0, 3.0, 4.0), Vector3.ZERO)
+
+	var packed_scene := PackedScene.new()
+	assert_int(packed_scene.pack(root)).is_equal(OK)
+	assert_int(DirAccess.make_dir_recursive_absolute(scene_path.get_base_dir())).is_equal(OK)
 	assert_int(ResourceSaver.save(packed_scene, scene_path)).is_equal(OK)
 	root.free()
 	return scene_path
