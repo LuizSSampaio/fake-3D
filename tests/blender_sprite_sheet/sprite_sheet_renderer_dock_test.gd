@@ -33,6 +33,11 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_object(_dock._export_frame_overlay).is_not_null()
 	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(256, 256))
 	assert_int(_dock._source_list.item_count).is_equal(0)
+	assert_vector(_dock._source_list.custom_minimum_size).is_equal(Vector2(0.0, 112.0))
+	assert_str(_dock._source_path_edit.placeholder_text).is_equal("Add model path...")
+	assert_bool(_dock._source_reload_button.disabled).is_true()
+	assert_bool(_dock._source_remove_button.disabled).is_true()
+	assert_bool(_dock._source_clear_button.disabled).is_true()
 	assert_str(_dock._name_pattern_edit.text).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_NAME_PATTERN)
 	assert_bool(_dock._background_color_picker.disabled).is_true()
 	assert_object(_dock._object_root).is_not_null()
@@ -122,8 +127,65 @@ func test_source_selection_deduplicates_and_previews_first_model() -> void:
 	assert_str(_dock._source_list.get_item_text(0)).is_equal("source_first_model.tscn")
 	assert_str(_dock._source_list.get_item_text(1)).is_equal("source_second_model.tscn")
 	assert_str(_dock._source_path_edit.text).is_equal(first_path)
+	assert_bool(_dock._source_reload_button.disabled).is_false()
+	assert_bool(_dock._source_remove_button.disabled).is_false()
+	assert_bool(_dock._source_clear_button.disabled).is_false()
 	assert_object(_dock._loaded_source).is_not_null()
 	assert_str(_dock._status_label.text).is_equal("Selected 2 source model(s).")
+
+
+func test_source_controls_place_model_list_before_add_bar() -> void:
+	var source_container: Node = _dock._source_list.get_parent()
+	var add_bar: Node = _dock._source_path_edit.get_parent()
+
+	assert_object(source_container).is_not_null()
+	assert_object(add_bar).is_not_null()
+	assert_int(source_container.get_child(0).get_instance_id()).is_equal(_dock._source_list.get_instance_id())
+	assert_int(source_container.get_child(1).get_instance_id()).is_equal(add_bar.get_instance_id())
+
+
+func test_add_source_from_bar_appends_without_replacing_existing_models() -> void:
+	var first_path := _save_test_scene("bar_first_model.tscn")
+	var second_path := _save_test_scene("bar_second_model.tscn")
+
+	_dock._load_source(first_path)
+	_dock._source_path_edit.text = second_path
+	var result: Dictionary = _dock._add_source_from_entry()
+
+	assert_bool(result.ok).is_true()
+	assert_int(_dock._source_paths.size()).is_equal(2)
+	assert_int(_dock._source_list.item_count).is_equal(2)
+	assert_str(_dock._source_list.get_item_text(0)).is_equal("bar_first_model.tscn")
+	assert_str(_dock._source_list.get_item_text(1)).is_equal("bar_second_model.tscn")
+	assert_int(_dock._get_selected_source_index()).is_equal(1)
+	assert_str(_dock._source_path_edit.text).is_equal(second_path)
+	assert_object(_dock._loaded_source).is_not_null()
+	assert_str(_dock._status_label.text).is_equal("Selected 2 source model(s).")
+
+
+func test_remove_selected_source_removes_one_model_and_previews_next() -> void:
+	var first_path := _save_test_scene("remove_first_model.tscn")
+	var second_path := _save_test_scene("remove_second_model.tscn")
+	var third_path := _save_test_scene("remove_third_model.tscn")
+	var paths := PackedStringArray()
+	paths.append(first_path)
+	paths.append(second_path)
+	paths.append(third_path)
+	_dock._set_source_paths(paths)
+	_dock._source_list.select(1)
+	_dock._on_source_list_item_selected(1)
+
+	_dock._remove_selected_source()
+
+	assert_int(_dock._source_paths.size()).is_equal(2)
+	assert_str(_dock._source_paths[0]).is_equal(first_path)
+	assert_str(_dock._source_paths[1]).is_equal(third_path)
+	assert_int(_dock._source_list.item_count).is_equal(2)
+	assert_str(_dock._source_list.get_item_text(0)).is_equal("remove_first_model.tscn")
+	assert_str(_dock._source_list.get_item_text(1)).is_equal("remove_third_model.tscn")
+	assert_int(_dock._get_selected_source_index()).is_equal(1)
+	assert_str(_dock._source_path_edit.text).is_equal(third_path)
+	assert_str(_dock._status_label.text).is_equal("Removed remove_second_model.tscn. Selected 2 source model(s).")
 
 
 func test_preview_export_overlay_tracks_export_aspect_ratio() -> void:

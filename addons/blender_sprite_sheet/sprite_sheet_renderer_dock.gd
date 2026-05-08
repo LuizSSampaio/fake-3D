@@ -30,6 +30,10 @@ var _profile_path_edit: LineEdit
 var _material_path_edit: LineEdit
 var _texture_path_edit: LineEdit
 var _source_list: ItemList
+var _source_add_button: Button
+var _source_reload_button: Button
+var _source_remove_button: Button
+var _source_clear_button: Button
 var _name_pattern_edit: LineEdit
 var _status_label: Label
 var _source_file_dialog: EditorFileDialog
@@ -95,7 +99,7 @@ func _build_ui() -> void:
 	content.add_theme_constant_override("separation", 8)
 	scroll.add_child(content)
 
-	content.add_child(ControlFactory.create_section_label("Source"))
+	content.add_child(ControlFactory.create_section_label("Models"))
 	content.add_child(_create_source_controls())
 
 	_status_label = Label.new()
@@ -128,48 +132,58 @@ func _create_source_controls() -> Control:
 	var container := VBoxContainer.new()
 	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	var picker_row := HBoxContainer.new()
-	picker_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	container.add_child(picker_row)
+	_source_list = ItemList.new()
+	_source_list.custom_minimum_size = Vector2(0.0, 112.0)
+	_source_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_source_list.select_mode = ItemList.SELECT_SINGLE
+	_source_list.item_selected.connect(_on_source_list_item_selected)
+	container.add_child(_source_list)
+
+	var add_row := HBoxContainer.new()
+	add_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.add_child(add_row)
 
 	_source_path_edit = LineEdit.new()
-	_source_path_edit.placeholder_text = "res://path/to/model.glb"
+	_source_path_edit.placeholder_text = "Add model path..."
 	_source_path_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_source_path_edit.text_submitted.connect(_on_source_path_submitted)
-	picker_row.add_child(_source_path_edit)
+	add_row.add_child(_source_path_edit)
 
 	var browse_button := Button.new()
 	browse_button.text = "Browse"
+	browse_button.tooltip_text = "Choose one or more models to add."
 	browse_button.pressed.connect(_on_browse_pressed)
-	picker_row.add_child(browse_button)
+	add_row.add_child(browse_button)
+
+	_source_add_button = Button.new()
+	_source_add_button.text = "Add"
+	_source_add_button.tooltip_text = "Add the typed model path to the list."
+	_source_add_button.pressed.connect(_add_source_from_entry)
+	add_row.add_child(_source_add_button)
 
 	var action_row := HBoxContainer.new()
 	action_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	var reload_button := Button.new()
-	reload_button.text = "Reload"
-	reload_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	reload_button.pressed.connect(_reload_source)
-	action_row.add_child(reload_button)
+	_source_reload_button = Button.new()
+	_source_reload_button.text = "Reload Selected"
+	_source_reload_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_source_reload_button.pressed.connect(_reload_source)
+	action_row.add_child(_source_reload_button)
 
-	var clear_button := Button.new()
-	clear_button.text = "Clear"
-	clear_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	clear_button.pressed.connect(_clear_sources)
-	action_row.add_child(clear_button)
+	_source_remove_button = Button.new()
+	_source_remove_button.text = "Remove Selected"
+	_source_remove_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_source_remove_button.pressed.connect(_remove_selected_source)
+	action_row.add_child(_source_remove_button)
+
+	_source_clear_button = Button.new()
+	_source_clear_button.text = "Clear All"
+	_source_clear_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_source_clear_button.pressed.connect(_clear_sources)
+	action_row.add_child(_source_clear_button)
 	container.add_child(action_row)
 
-	var source_row := HBoxContainer.new()
-	source_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	source_row.add_child(ControlFactory.create_row_label("Models"))
-
-	_source_list = ItemList.new()
-	_source_list.custom_minimum_size = Vector2(0.0, 72.0)
-	_source_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_source_list.select_mode = ItemList.SELECT_SINGLE
-	_source_list.item_selected.connect(_on_source_list_item_selected)
-	source_row.add_child(_source_list)
-	container.add_child(source_row)
+	_update_source_actions()
 
 	return container
 
@@ -470,7 +484,7 @@ func _on_browse_pressed() -> void:
 
 
 func _on_source_files_selected(paths: PackedStringArray) -> void:
-	_set_source_paths(paths)
+	_add_source_paths(paths)
 
 
 func _on_material_browse_pressed() -> void:
@@ -520,7 +534,7 @@ func _on_output_file_selected(path: String) -> void:
 
 
 func _on_source_path_submitted(path: String) -> void:
-	_load_source(path)
+	_add_source_path(path)
 
 
 func _on_material_path_submitted(path: String) -> void:
@@ -545,6 +559,7 @@ func _on_source_list_item_selected(index: int) -> void:
 	if index < 0 or index >= _source_paths.size():
 		return
 
+	_update_source_actions()
 	_preview_source(_source_paths[index])
 
 
@@ -559,15 +574,17 @@ func _clear_texture_path() -> void:
 
 
 func _reload_source() -> void:
-	var source_path := _source_path_edit.text.strip_edges()
-	if source_path.is_empty() and not _source_paths.is_empty():
-		source_path = _source_paths[0]
+	var source_path := _get_selected_source_path()
+	if source_path.is_empty():
+		source_path = _source_path_edit.text.strip_edges()
 
 	if source_path.is_empty():
 		_set_status("Select a supported 3D asset to preview.", true)
 		return
 
-	if _source_paths.find(source_path) != -1:
+	var source_index := _source_paths.find(source_path)
+	if source_index != -1:
+		_select_source_index(source_index)
 		_preview_source(source_path)
 	else:
 		_load_source(source_path)
@@ -640,11 +657,12 @@ func _preview_source(path: String) -> Dictionary:
 
 func _set_source_paths(paths: PackedStringArray, preview_first := true) -> Dictionary:
 	_source_paths = SourceSelection.normalize_paths(paths)
-	_update_source_list()
+	_update_source_list(0 if preview_first else -1)
 
 	if _source_paths.is_empty():
 		_clear_loaded_source()
 		_source_path_edit.clear()
+		_update_source_actions()
 		var message := "Select a supported 3D asset to preview."
 		_set_status(message, false)
 		return {
@@ -671,8 +689,129 @@ func _clear_sources() -> void:
 	_set_source_paths(PackedStringArray(), false)
 
 
-func _update_source_list() -> void:
+func _add_source_from_entry() -> Dictionary:
+	return _add_source_path(_source_path_edit.text)
+
+
+func _add_source_path(path: String) -> Dictionary:
+	var paths := PackedStringArray()
+	paths.append(path)
+	return _add_source_paths(paths)
+
+
+func _add_source_paths(paths: PackedStringArray) -> Dictionary:
+	var normalized_paths := SourceSelection.normalize_paths(paths)
+	if normalized_paths.is_empty():
+		var message := "Enter a supported 3D asset path to add."
+		_set_status(message, true)
+		return {
+			"ok": false,
+			"message": message,
+		}
+
+	var merged_paths := PackedStringArray()
+	for source_path in _source_paths:
+		merged_paths.append(source_path)
+
+	var selected_index := -1
+	for source_path in normalized_paths:
+		var existing_index := merged_paths.find(source_path)
+		if existing_index == -1:
+			merged_paths.append(source_path)
+			if selected_index == -1:
+				selected_index = merged_paths.size() - 1
+		elif selected_index == -1:
+			selected_index = existing_index
+
+	_source_paths = SourceSelection.normalize_paths(merged_paths)
+	if selected_index == -1 and not _source_paths.is_empty():
+		selected_index = 0
+
+	_update_source_list(selected_index)
+	var load_result := _preview_source(_source_paths[selected_index])
+	if not load_result.ok:
+		return load_result
+
+	if _source_paths.size() > 1:
+		_set_status("Selected %d source model(s)." % _source_paths.size(), false)
+
+	return load_result
+
+
+func _remove_selected_source() -> void:
+	var selected_index := _get_selected_source_index()
+	if selected_index == -1:
+		_set_status("Select a model to remove.", true)
+		return
+
+	var removed_path := _source_paths[selected_index]
+	var remaining_paths := PackedStringArray()
+	for index in range(_source_paths.size()):
+		if index != selected_index:
+			remaining_paths.append(_source_paths[index])
+
+	if remaining_paths.is_empty():
+		_set_source_paths(remaining_paths, false)
+		_set_status("Removed %s. Add a model to preview." % removed_path.get_file(), false)
+		return
+
+	_source_paths = remaining_paths
+	var next_index := mini(selected_index, _source_paths.size() - 1)
+	_update_source_list(next_index)
+	var load_result := _preview_source(_source_paths[next_index])
+	if load_result.ok:
+		_set_status("Removed %s. Selected %d source model(s)." % [removed_path.get_file(), _source_paths.size()], false)
+
+
+func _update_source_list(selected_index := -1) -> void:
 	SourceSelection.populate_item_list(_source_list, _source_paths)
+	_select_source_index(selected_index)
+
+
+func _select_source_index(index: int) -> void:
+	if _source_list == null:
+		return
+
+	_source_list.deselect_all()
+	if index >= 0 and index < _source_paths.size():
+		_source_list.select(index)
+
+	_update_source_actions()
+
+
+func _get_selected_source_index() -> int:
+	if _source_list == null:
+		return -1
+
+	var selected_items := _source_list.get_selected_items()
+	if selected_items.is_empty():
+		return -1
+
+	var selected_index := selected_items[0]
+	if selected_index < 0 or selected_index >= _source_paths.size():
+		return -1
+
+	return selected_index
+
+
+func _get_selected_source_path() -> String:
+	var selected_index := _get_selected_source_index()
+	if selected_index == -1:
+		return ""
+
+	return _source_paths[selected_index]
+
+
+func _update_source_actions() -> void:
+	var has_sources := not _source_paths.is_empty()
+	var has_selection := _get_selected_source_index() != -1
+
+	if _source_reload_button:
+		_source_reload_button.disabled = not has_selection
+	if _source_remove_button:
+		_source_remove_button.disabled = not has_selection
+	if _source_clear_button:
+		_source_clear_button.disabled = not has_sources
 
 
 func _instantiate_resource(resource: Resource) -> Node:
