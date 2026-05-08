@@ -107,33 +107,68 @@ func _build_ui() -> void:
 	content.add_theme_constant_override("separation", 8)
 	scroll.add_child(content)
 
-	content.add_child(ControlFactory.create_section_label("Models"))
-	content.add_child(_create_source_controls())
+	var models_content := VBoxContainer.new()
+	models_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	models_content.add_theme_constant_override("separation", 8)
+	models_content.add_child(_create_source_controls())
 
 	_status_label = Label.new()
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status_label.text = "Select a supported 3D asset to preview."
-	content.add_child(_status_label)
+	models_content.add_child(_status_label)
+	_add_collapsible_section(content, "Models", models_content)
 
-	content.add_child(ControlFactory.create_section_label("Preview"))
-	content.add_child(_create_preview_controls())
+	_add_collapsible_section(content, "Preview", _create_preview_controls())
 
-	content.add_child(ControlFactory.create_section_label("Object"))
-	content.add_child(_create_object_controls())
+	_add_collapsible_section(content, "Object", _create_object_controls())
 
-	content.add_child(ControlFactory.create_section_label("Profile"))
-	content.add_child(_create_profile_controls())
+	_add_collapsible_section(content, "Profile", _create_profile_controls())
 
-	content.add_child(ControlFactory.create_section_label("Material"))
-	content.add_child(_create_material_controls())
+	_add_collapsible_section(content, "Material", _create_material_controls())
 
-	content.add_child(ControlFactory.create_section_label("Background"))
-	content.add_child(_create_background_controls())
+	_add_collapsible_section(content, "Background", _create_background_controls())
 
-	content.add_child(ControlFactory.create_section_label("Export"))
-	content.add_child(_create_export_controls())
+	_add_collapsible_section(content, "Export", _create_export_controls())
 
 	_create_file_dialogs()
+
+
+func _add_collapsible_section(parent: BoxContainer, title: String, body: Control, collapsed := false, subsection := false) -> VBoxContainer:
+	var section := VBoxContainer.new()
+	section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	section.add_theme_constant_override("separation", 4 if subsection else 6)
+	section.set_meta("collapsible_title", title)
+	section.set_meta("collapsible_subsection", subsection)
+
+	var header := Button.new()
+	header.toggle_mode = true
+	header.button_pressed = not collapsed
+	header.flat = subsection
+	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.focus_mode = Control.FOCUS_NONE
+	header.add_theme_font_size_override("font_size", 14 if subsection else ControlFactory.SECTION_FONT_SIZE)
+	header.text = _get_collapsible_header_text(title, header.button_pressed, subsection)
+	header.toggled.connect(func(expanded: bool) -> void:
+		body.visible = expanded
+		header.text = _get_collapsible_header_text(title, expanded, subsection)
+	)
+	section.add_child(header)
+
+	body.visible = header.button_pressed
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	section.add_child(body)
+
+	parent.add_child(section)
+	return section
+
+
+func _get_collapsible_header_text(title: String, expanded: bool, subsection: bool) -> String:
+	var prefix := "v" if expanded else ">"
+	if subsection:
+		return "  %s %s" % [prefix, title]
+
+	return "%s %s" % [prefix, title]
 
 
 func _create_source_controls() -> Control:
@@ -313,9 +348,14 @@ func _create_object_controls() -> Control:
 	var container := VBoxContainer.new()
 	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	_object_position_controls = ControlFactory.create_vector3_row(container, "Position", DEFAULT_OBJECT_POSITION, -1000.0, 1000.0, 0.01, _on_object_control_changed)
-	_object_rotation_controls = ControlFactory.create_vector3_row(container, "Rotation", DEFAULT_OBJECT_ROTATION, -360.0, 360.0, 0.1, _on_object_control_changed)
+	var transform_controls := VBoxContainer.new()
+	transform_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_object_position_controls = ControlFactory.create_vector3_row(transform_controls, "Position", DEFAULT_OBJECT_POSITION, -1000.0, 1000.0, 0.01, _on_object_control_changed)
+	_object_rotation_controls = ControlFactory.create_vector3_row(transform_controls, "Rotation", DEFAULT_OBJECT_ROTATION, -360.0, 360.0, 0.1, _on_object_control_changed)
+	_add_collapsible_section(container, "Transform", transform_controls, false, true)
 
+	var camera_controls := VBoxContainer.new()
+	camera_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var projection_row := HBoxContainer.new()
 	projection_row.add_child(ControlFactory.create_row_label("Projection"))
 	_camera_projection_option = OptionButton.new()
@@ -324,25 +364,29 @@ func _create_object_controls() -> Control:
 	_camera_projection_option.add_item("Orthographic", Camera3D.PROJECTION_ORTHOGONAL)
 	_camera_projection_option.item_selected.connect(_on_projection_selected)
 	projection_row.add_child(_camera_projection_option)
-	container.add_child(projection_row)
+	camera_controls.add_child(projection_row)
 
 	_camera_fov_spin = ControlFactory.create_spin_box(1.0, 179.0, 0.1, 70.0)
-	ControlFactory.add_labeled_control(container, "FOV", _camera_fov_spin)
+	ControlFactory.add_labeled_control(camera_controls, "FOV", _camera_fov_spin)
 	_camera_fov_spin.value_changed.connect(_on_camera_control_changed)
 
 	_camera_orthographic_size_spin = ControlFactory.create_spin_box(0.001, 1000.0, 0.01, 4.0)
-	ControlFactory.add_labeled_control(container, "Ortho Size", _camera_orthographic_size_spin)
+	ControlFactory.add_labeled_control(camera_controls, "Ortho Size", _camera_orthographic_size_spin)
 	_camera_orthographic_size_spin.value_changed.connect(_on_camera_control_changed)
+	_add_collapsible_section(container, "Camera", camera_controls, false, true)
 
+	var action_controls := VBoxContainer.new()
+	action_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var frame_button := Button.new()
 	frame_button.text = "Frame Model"
 	frame_button.pressed.connect(_frame_model)
-	container.add_child(frame_button)
+	action_controls.add_child(frame_button)
 
 	var reset_button := Button.new()
 	reset_button.text = "Reset Object"
 	reset_button.pressed.connect(_reset_object)
-	container.add_child(reset_button)
+	action_controls.add_child(reset_button)
+	_add_collapsible_section(container, "Actions", action_controls, true, true)
 
 	return container
 
@@ -369,49 +413,57 @@ func _create_export_controls() -> Control:
 	var container := VBoxContainer.new()
 	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
+	var sheet_controls := VBoxContainer.new()
+	sheet_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_frame_width_spin = ControlFactory.create_spin_box(1.0, 8192.0, 1.0, 256.0)
-	ControlFactory.add_labeled_control(container, "Width", _frame_width_spin)
+	ControlFactory.add_labeled_control(sheet_controls, "Width", _frame_width_spin)
 	_frame_width_spin.value_changed.connect(_on_export_dimensions_changed)
 
 	_frame_height_spin = ControlFactory.create_spin_box(1.0, 8192.0, 1.0, 256.0)
-	ControlFactory.add_labeled_control(container, "Height", _frame_height_spin)
+	ControlFactory.add_labeled_control(sheet_controls, "Height", _frame_height_spin)
 	_frame_height_spin.value_changed.connect(_on_export_dimensions_changed)
 
 	_frame_count_spin = ControlFactory.create_spin_box(1.0, 10000.0, 1.0, 1.0)
-	ControlFactory.add_labeled_control(container, "Frames", _frame_count_spin)
+	ControlFactory.add_labeled_control(sheet_controls, "Frames", _frame_count_spin)
 
 	_columns_spin = ControlFactory.create_spin_box(1.0, 10000.0, 1.0, 1.0)
-	ControlFactory.add_labeled_control(container, "Columns", _columns_spin)
+	ControlFactory.add_labeled_control(sheet_controls, "Columns", _columns_spin)
 
 	_frame_spacing_spin = ControlFactory.create_spin_box(0.0, 1024.0, 1.0, 0.0)
-	ControlFactory.add_labeled_control(container, "Spacing", _frame_spacing_spin)
+	ControlFactory.add_labeled_control(sheet_controls, "Spacing", _frame_spacing_spin)
+	_add_collapsible_section(container, "Sprite Sheet", sheet_controls, false, true)
 
+	var quality_controls := VBoxContainer.new()
+	quality_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_msaa_option = ControlFactory.create_option_button(RenderOptions.get_msaa_options(), RenderOptions.DEFAULT_MSAA_3D)
-	ControlFactory.add_labeled_control(container, "MSAA", _msaa_option)
+	ControlFactory.add_labeled_control(quality_controls, "MSAA", _msaa_option)
 	_msaa_option.item_selected.connect(_on_render_option_selected)
 
 	_screen_space_aa_option = ControlFactory.create_option_button(RenderOptions.get_screen_space_aa_options(), RenderOptions.DEFAULT_SCREEN_SPACE_AA)
-	ControlFactory.add_labeled_control(container, "Edge AA", _screen_space_aa_option)
+	ControlFactory.add_labeled_control(quality_controls, "Edge AA", _screen_space_aa_option)
 	_screen_space_aa_option.item_selected.connect(_on_render_option_selected)
 
 	_taa_check = CheckBox.new()
 	_taa_check.text = "Temporal anti-aliasing"
 	_taa_check.button_pressed = RenderOptions.DEFAULT_USE_TAA
 	_taa_check.toggled.connect(_on_taa_toggled)
-	container.add_child(_taa_check)
+	quality_controls.add_child(_taa_check)
 
 	_supersample_option = ControlFactory.create_option_button(RenderOptions.get_supersample_options(), RenderOptions.DEFAULT_SUPERSAMPLE_SCALE)
-	ControlFactory.add_labeled_control(container, "Supersample", _supersample_option)
+	ControlFactory.add_labeled_control(quality_controls, "Supersample", _supersample_option)
 	_supersample_option.item_selected.connect(_on_render_option_selected)
 
 	_resize_filter_option = ControlFactory.create_option_button(RenderOptions.get_resize_filter_options(), RenderOptions.DEFAULT_RESIZE_FILTER)
-	ControlFactory.add_labeled_control(container, "Resize Filter", _resize_filter_option)
+	ControlFactory.add_labeled_control(quality_controls, "Resize Filter", _resize_filter_option)
 	_resize_filter_option.item_selected.connect(_on_render_option_selected)
 
 	_anisotropic_filtering_option = ControlFactory.create_option_button(RenderOptions.get_anisotropic_filtering_options(), RenderOptions.DEFAULT_ANISOTROPIC_FILTERING)
-	ControlFactory.add_labeled_control(container, "Texture Filter", _anisotropic_filtering_option)
+	ControlFactory.add_labeled_control(quality_controls, "Texture Filter", _anisotropic_filtering_option)
 	_anisotropic_filtering_option.item_selected.connect(_on_render_option_selected)
+	_add_collapsible_section(container, "Quality", quality_controls, true, true)
 
+	var output_controls := VBoxContainer.new()
+	output_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var output_row := HBoxContainer.new()
 	output_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	output_row.add_child(ControlFactory.create_row_label("Folder"))
@@ -427,17 +479,18 @@ func _create_export_controls() -> Control:
 	output_browse_button.text = "Browse"
 	output_browse_button.pressed.connect(_on_output_browse_pressed)
 	output_row.add_child(output_browse_button)
-	container.add_child(output_row)
+	output_controls.add_child(output_row)
 
 	_name_pattern_edit = LineEdit.new()
 	_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
 	_name_pattern_edit.placeholder_text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
 	_name_pattern_edit.tooltip_text = "Tokens: {model}, {source}, {index}, {index0}, {count}, {output} (folder name)"
-	ControlFactory.add_labeled_control(container, "Name Pattern", _name_pattern_edit)
+	ControlFactory.add_labeled_control(output_controls, "Name Pattern", _name_pattern_edit)
 
 	_export_individual_frames_check = CheckBox.new()
 	_export_individual_frames_check.text = "Export individual frames"
-	container.add_child(_export_individual_frames_check)
+	output_controls.add_child(_export_individual_frames_check)
+	_add_collapsible_section(container, "Output", output_controls, false, true)
 
 	_export_button = Button.new()
 	_export_button.text = "Export PNG"

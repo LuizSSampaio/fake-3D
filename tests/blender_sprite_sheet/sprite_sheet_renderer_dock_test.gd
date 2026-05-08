@@ -156,6 +156,36 @@ func test_source_controls_place_model_list_before_add_bar() -> void:
 	assert_int(source_container.get_child(1).get_instance_id()).is_equal(add_bar.get_instance_id())
 
 
+func test_editor_panel_uses_collapsible_sections_and_subsections() -> void:
+	for title in ["Models", "Preview", "Object", "Profile", "Material", "Background", "Export"]:
+		var section := _find_collapsible_section(title)
+		assert_object(section).is_not_null()
+		assert_bool(_get_section_header(section).toggle_mode).is_true()
+		assert_bool(_get_section_body(section).visible).is_true()
+
+	for title in ["Transform", "Camera", "Actions", "Sprite Sheet", "Quality", "Output"]:
+		assert_object(_find_collapsible_section(title, true)).is_not_null()
+
+	var preview_section := _find_collapsible_section("Preview")
+	var preview_header := _get_section_header(preview_section)
+	preview_header.button_pressed = false
+	assert_bool(_preview_stack_is_visible()).is_false()
+	assert_bool(preview_header.text.begins_with("> ")).is_true()
+
+	preview_header.button_pressed = true
+	assert_bool(_preview_stack_is_visible()).is_true()
+	assert_bool(preview_header.text.begins_with("v ")).is_true()
+
+	var quality_section := _find_collapsible_section("Quality", true)
+	var quality_header := _get_section_header(quality_section)
+	assert_bool(quality_header.button_pressed).is_false()
+	assert_bool(_get_section_body(quality_section).visible).is_false()
+
+	quality_header.button_pressed = true
+	assert_bool(_get_section_body(quality_section).visible).is_true()
+	assert_str(quality_header.text).contains("Quality")
+
+
 func test_add_source_from_bar_appends_without_replacing_existing_models() -> void:
 	var first_path := _save_test_scene("bar_first_model.tscn")
 	var second_path := _save_test_scene("bar_second_model.tscn")
@@ -747,6 +777,35 @@ func _select_option_by_id(option_button: OptionButton, item_id: int) -> void:
 
 	if option_button.item_count > 0:
 		option_button.select(0)
+
+
+func _find_collapsible_section(title: String, subsection := false) -> VBoxContainer:
+	return _find_collapsible_section_in(_dock, title, subsection)
+
+
+func _find_collapsible_section_in(node: Node, title: String, subsection: bool) -> VBoxContainer:
+	if node is VBoxContainer and node.has_meta("collapsible_title"):
+		if str(node.get_meta("collapsible_title")) == title and bool(node.get_meta("collapsible_subsection")) == subsection:
+			return node as VBoxContainer
+
+	for child in node.get_children():
+		var found := _find_collapsible_section_in(child, title, subsection)
+		if found != null:
+			return found
+
+	return null
+
+
+func _get_section_header(section: VBoxContainer) -> Button:
+	return section.get_child(0) as Button
+
+
+func _get_section_body(section: VBoxContainer) -> Control:
+	return section.get_child(1) as Control
+
+
+func _preview_stack_is_visible() -> bool:
+	return _dock._preview_stack.visible
 
 
 func _save_test_scene(file_name: String) -> String:
