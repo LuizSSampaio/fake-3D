@@ -78,12 +78,12 @@ static func assemble_sprite_sheet(frames: Array[Image], frame_width: int, frame_
 	return Layout.assemble_sprite_sheet(frames, frame_width, frame_height, columns, frame_spacing, resize_filter)
 
 
-static func export_images(frames: Array[Image], settings: Dictionary) -> Dictionary:
-	return Output.export_images(frames, settings)
+static func export_images(frames: Array[Image], settings: Dictionary, normal_frames: Array[Image] = []) -> Dictionary:
+	return Output.export_images(frames, settings, normal_frames)
 
 
-static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionary:
-	return Output.export_pngs(frames, settings)
+static func export_pngs(frames: Array[Image], settings: Dictionary, normal_frames: Array[Image] = []) -> Dictionary:
+	return Output.export_pngs(frames, settings, normal_frames)
 
 
 static func get_individual_frame_paths(output_path: String, frame_count: int, output_format := "") -> PackedStringArray:
@@ -96,6 +96,14 @@ static func get_metadata_path(output_path: String) -> String:
 
 static func get_sprite_frames_path(output_path: String) -> String:
 	return Paths.get_sprite_frames_path(output_path)
+
+
+static func get_normal_map_path(output_path: String) -> String:
+	return Paths.get_normal_map_path(output_path)
+
+
+static func get_normal_map_frame_paths(output_path: String, frame_count: int) -> PackedStringArray:
+	return Paths.get_normal_map_frame_paths(output_path, frame_count)
 
 
 static func get_export_paths(output_path: String, frame_count: int, settings: Dictionary) -> PackedStringArray:
@@ -116,3 +124,7 @@ static func write_sprite_frames(sprite_frames_path: String, frames: Array[Image]
 
 static func format_export_file_count(count: int, output_format: Variant) -> String:
 	return Paths.format_export_file_count(count, output_format)
+
+
+static func format_exported_paths(paths: PackedStringArray, output_format: Variant) -> String:
+	return Paths.format_exported_paths(paths, output_format)

@@ -7,6 +7,7 @@ const SpriteSheetCapture := preload("res://addons/blender_sprite_sheet/sprite_sh
 const AnimationUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_animation_utils.gd")
 const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_frame_overlay.gd")
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
+const NormalMap := preload("res://addons/blender_sprite_sheet/sprite_sheet_normal_map.gd")
 const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
 const ProfileStore := preload("res://addons/blender_sprite_sheet/sprite_sheet_profile_store.gd")
 const PreviewScene := preload("res://addons/blender_sprite_sheet/sprite_sheet_preview_scene.gd")
@@ -61,6 +62,7 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_str(_dock._name_pattern_edit.text).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_NAME_PATTERN)
 	assert_str(_dock._get_selected_output_format()).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_FORMAT)
 	assert_bool(_dock._export_metadata_check.button_pressed).is_false()
+	assert_bool(_dock._export_normal_map_check.button_pressed).is_false()
 	assert_bool(_dock._export_sprite_frames_check.button_pressed).is_false()
 	assert_bool(_dock._overwrite_existing_check.button_pressed).is_true()
 	assert_bool(_dock._background_color_picker.disabled).is_true()
@@ -358,6 +360,7 @@ func test_editor_panel_uses_style_guide_button_text_and_tooltips() -> void:
 	assert_str(output_browse_button.text).is_equal("Browse...")
 	assert_str(_dock._output_path_edit.tooltip_text).is_equal("Choose where generated image files will be written.")
 	assert_str(_dock._name_pattern_edit.tooltip_text).contains("\n")
+	assert_str(_dock._export_normal_map_check.tooltip_text).contains("Godot 2D lighting")
 
 
 func test_vector_numeric_controls_match_inspector_axis_style() -> void:
@@ -492,6 +495,14 @@ func test_output_format_control_updates_export_settings() -> void:
 	assert_str(settings.name_pattern).is_equal("{model}.jpg")
 
 
+func test_normal_map_option_updates_export_settings() -> void:
+	_dock._export_normal_map_check.button_pressed = true
+
+	var settings: Dictionary = _dock._collect_export_settings()
+
+	assert_bool(settings.export_normal_map).is_true()
+
+
 func test_apply_material_settings_sets_and_clears_surface_overrides() -> void:
 	_dock._load_source(_save_test_scene("material_model.tscn"))
 	var material := StandardMaterial3D.new()
@@ -515,6 +526,44 @@ func test_apply_material_settings_sets_and_clears_surface_overrides() -> void:
 
 	assert_object(mesh_instance.get_surface_override_material(0)).is_null()
 	assert_str(_dock._status_label.text).is_equal("Cleared preview material override.")
+
+
+func test_normal_map_material_overrides_visible_mesh_surfaces() -> void:
+	var root: Node3D = auto_free(Node3D.new())
+	var mesh_instance := _add_mesh_instance(root, Vector3(1.0, 1.0, 1.0), Vector3.ZERO)
+
+	NormalMap.apply_to_model(root)
+
+	var override_material := mesh_instance.get_surface_override_material(0)
+	assert_bool(override_material is ShaderMaterial).is_true()
+	assert_str(((override_material as ShaderMaterial).shader as Shader).code).contains("NORMAL")
+
+
+func test_normal_map_shader_uses_opaque_front_face_depth() -> void:
+	assert_str(NormalMap.NORMAL_SHADER_CODE).contains("depth_draw_opaque")
+	assert_str(NormalMap.NORMAL_SHADER_CODE).contains("cull_back")
+	assert_bool(NormalMap.NORMAL_SHADER_CODE.contains("cull_disabled")).is_false()
+	assert_bool(NormalMap.NORMAL_SHADER_CODE.contains("FRONT_FACING")).is_false()
+	assert_bool(NormalMap.NORMAL_SHADER_CODE.contains("ALPHA")).is_false()
+
+
+func test_normal_map_finalize_capture_uses_neutral_background() -> void:
+	var image := Image.create(2, 1, false, Image.FORMAT_RGBA8)
+	image.set_pixel(0, 0, Color(0.0, 1.0, 1.0, 1.0))
+	image.set_pixel(1, 0, Color(0.0, 0.0, 0.0, 0.0))
+
+	var transparent_result := NormalMap.finalize_capture(image, true)
+	var opaque_result := NormalMap.finalize_capture(image, false)
+
+	assert_that(transparent_result.get_pixel(0, 0)).is_equal(Color(0.0, 1.0, 1.0, 1.0))
+	assert_float(transparent_result.get_pixel(1, 0).r).is_equal_approx(0.5, 0.01)
+	assert_float(transparent_result.get_pixel(1, 0).g).is_equal_approx(0.5, 0.01)
+	assert_float(transparent_result.get_pixel(1, 0).b).is_equal_approx(1.0, 0.01)
+	assert_float(transparent_result.get_pixel(1, 0).a).is_equal_approx(0.0, 0.01)
+	assert_float(opaque_result.get_pixel(1, 0).r).is_equal_approx(0.5, 0.01)
+	assert_float(opaque_result.get_pixel(1, 0).g).is_equal_approx(0.5, 0.01)
+	assert_float(opaque_result.get_pixel(1, 0).b).is_equal_approx(1.0, 0.01)
+	assert_float(opaque_result.get_pixel(1, 0).a).is_equal_approx(1.0, 0.01)
 
 
 func test_background_controls_switch_transparency_and_color() -> void:
@@ -646,6 +695,7 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	_select_option_by_id(_dock._anisotropic_filtering_option, Viewport.ANISOTROPY_16X)
 	_dock._select_output_format("webp")
 	_dock._export_individual_frames_check.button_pressed = true
+	_dock._export_normal_map_check.button_pressed = true
 	_dock._export_metadata_check.button_pressed = true
 	_dock._export_sprite_frames_check.button_pressed = true
 	_dock._overwrite_existing_check.button_pressed = false
@@ -703,6 +753,7 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	assert_int(int(profile.export.anisotropic_filtering)).is_equal(Viewport.ANISOTROPY_16X)
 	assert_str(profile.export.output_format).is_equal("webp")
 	assert_bool(bool(profile.export.export_individual_frames)).is_true()
+	assert_bool(bool(profile.export.export_normal_map)).is_true()
 	assert_bool(bool(profile.export.export_metadata)).is_true()
 	assert_bool(bool(profile.export.export_sprite_frames)).is_true()
 	assert_bool(bool(profile.export.overwrite_existing)).is_false()
@@ -777,6 +828,7 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 			"anisotropic_filtering": Viewport.ANISOTROPY_16X,
 			"output_format": "jpg",
 			"export_individual_frames": true,
+			"export_normal_map": true,
 			"export_metadata": true,
 			"export_sprite_frames": true,
 			"overwrite_existing": false,
@@ -830,6 +882,7 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	assert_int(_dock._viewport.anisotropic_filtering_level).is_equal(Viewport.ANISOTROPY_16X)
 	assert_str(_dock._get_selected_output_format()).is_equal("jpg")
 	assert_bool(_dock._export_individual_frames_check.button_pressed).is_true()
+	assert_bool(_dock._export_normal_map_check.button_pressed).is_true()
 	assert_bool(_dock._export_metadata_check.button_pressed).is_true()
 	assert_bool(_dock._export_sprite_frames_check.button_pressed).is_true()
 	assert_bool(_dock._overwrite_existing_check.button_pressed).is_false()
@@ -1087,6 +1140,23 @@ func test_export_validation_uses_selected_output_format_for_generated_paths() ->
 	assert_str(validation.settings.output_path).ends_with("source_validate_webp.webp")
 
 
+func test_normal_map_paths_are_png_sidecars() -> void:
+	var output_path := "res://exports/book.webp"
+	var paths := SpriteSheetExporter.get_export_paths(output_path, 2, {
+		"output_format": "webp",
+		"export_normal_map": true,
+		"export_individual_frames": true,
+	})
+	var normal_frame_paths := SpriteSheetExporter.get_normal_map_frame_paths(output_path, 2)
+
+	assert_str(SpriteSheetExporter.get_normal_map_path(output_path)).is_equal("res://exports/book_normal.png")
+	assert_array(Array(paths)).contains("res://exports/book.webp")
+	assert_array(Array(paths)).contains("res://exports/book_normal.png")
+	assert_array(Array(paths)).contains("res://exports/book_normal_000.png")
+	assert_array(Array(paths)).contains("res://exports/book_normal_001.png")
+	assert_str(normal_frame_paths[0]).ends_with("book_normal_000.png")
+
+
 func test_export_validation_normalizes_supported_formats_and_rejects_unknown_format() -> void:
 	var output_directory := _temp_resource_directory()
 	var settings := {
@@ -1178,6 +1248,70 @@ func test_exporter_writes_sprite_sheet_and_individual_png_frames() -> void:
 	var sheet := Image.load_from_file(output_path)
 	assert_object(sheet).is_not_null()
 	assert_vector(sheet.get_size()).is_equal(Vector2i(9, 4))
+
+
+func test_exporter_writes_normal_map_sheet_and_individual_frames() -> void:
+	var output_path := _temp_resource_path("normal_export.png")
+	var frames: Array[Image] = [
+		_create_color_image(4, 4, Color(1.0, 0.0, 0.0, 1.0)),
+		_create_color_image(4, 4, Color(0.0, 1.0, 0.0, 1.0)),
+	]
+	var normal_frames: Array[Image] = [
+		_create_color_image(4, 4, Color(0.5, 0.5, 1.0, 1.0)),
+		_create_color_image(4, 4, Color(1.0, 0.5, 0.5, 1.0)),
+	]
+	var settings := {
+		"frame_width": 4,
+		"frame_height": 4,
+		"frame_count": 2,
+		"columns": 2,
+		"frame_spacing": 1,
+		"output_path": output_path,
+		"export_individual_frames": true,
+		"export_normal_map": true,
+		"export_metadata": true,
+	}
+
+	var export_result := SpriteSheetExporter.export_images(frames, settings, normal_frames)
+	var normal_map_path := SpriteSheetExporter.get_normal_map_path(output_path)
+	var normal_frame_paths := SpriteSheetExporter.get_normal_map_frame_paths(output_path, 2)
+	var metadata := _read_json_file(SpriteSheetExporter.get_metadata_path(output_path))
+
+	assert_bool(export_result.ok).is_true()
+	assert_array(Array(export_result.paths)).contains(normal_map_path)
+	assert_array(Array(export_result.paths)).contains(normal_frame_paths[0])
+	assert_array(Array(export_result.paths)).contains(normal_frame_paths[1])
+	assert_bool(FileAccess.file_exists(normal_map_path)).is_true()
+	assert_bool(FileAccess.file_exists(normal_frame_paths[0])).is_true()
+	assert_bool(FileAccess.file_exists(normal_frame_paths[1])).is_true()
+	assert_str(metadata.normal_map_path).is_equal(normal_map_path)
+	assert_int(metadata.normal_frame_paths.size()).is_equal(2)
+
+	var normal_sheet := Image.load_from_file(normal_map_path)
+	assert_object(normal_sheet).is_not_null()
+	assert_vector(normal_sheet.get_size()).is_equal(Vector2i(9, 4))
+
+
+func test_exporter_rejects_normal_map_export_without_normal_frames() -> void:
+	var output_path := _temp_resource_path("missing_normal_frames.png")
+	var frames: Array[Image] = [
+		_create_color_image(4, 4, Color(1.0, 0.0, 0.0, 1.0)),
+	]
+	var settings := {
+		"frame_width": 4,
+		"frame_height": 4,
+		"frame_count": 1,
+		"columns": 1,
+		"frame_spacing": 0,
+		"output_path": output_path,
+		"export_normal_map": true,
+	}
+
+	var export_result := SpriteSheetExporter.export_images(frames, settings)
+
+	assert_bool(export_result.ok).is_false()
+	assert_str(export_result.message).contains("no normal frames")
+	assert_bool(FileAccess.file_exists(output_path)).is_false()
 
 
 func test_exporter_writes_metadata_json_and_sprite_frames_resource() -> void:

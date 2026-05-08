@@ -4,6 +4,7 @@ extends RefCounted
 const DEFAULT_FRAME_DIGITS := 3
 const DEFAULT_OUTPUT_NAME_PATTERN := "{model}.png"
 const DEFAULT_OUTPUT_FORMAT := "png"
+const NormalMap := preload("res://addons/blender_sprite_sheet/sprite_sheet_normal_map.gd")
 const OUTPUT_FORMATS := [
 	{"label": "PNG", "key": "png", "extension": "png"},
 	{"label": "WebP", "key": "webp", "extension": "webp"},
@@ -177,6 +178,14 @@ static func get_sprite_frames_path(output_path: String) -> String:
 	return "%s_sprite_frames.tres" % output_path.strip_edges().get_basename()
 
 
+static func get_normal_map_path(output_path: String) -> String:
+	return NormalMap.get_output_path(output_path)
+
+
+static func get_normal_map_frame_paths(output_path: String, frame_count: int) -> PackedStringArray:
+	return NormalMap.get_individual_frame_paths(output_path, frame_count)
+
+
 static func get_export_paths(output_path: String, frame_count: int, settings: Dictionary) -> PackedStringArray:
 	var output_format := normalize_output_format(settings.get("output_format", output_path.get_extension()))
 	if output_format.is_empty():
@@ -195,11 +204,17 @@ static func get_export_paths(output_path: String, frame_count: int, settings: Di
 	if bool(settings.get("export_sprite_frames", false)):
 		paths.append(get_sprite_frames_path(normalized_output_path))
 
+	paths.append_array(NormalMap.get_export_paths(normalized_output_path, frame_count, settings))
+
 	return paths
 
 
 static func format_export_file_count(count: int, output_format: Variant) -> String:
 	return "%d %s %s" % [count, get_output_format_label(output_format), "file" if count == 1 else "files"]
+
+
+static func format_exported_paths(paths: PackedStringArray, output_format: Variant) -> String:
+	return _format_exported_paths(paths, output_format)
 
 
 static func _directory_exists(path: String) -> bool:

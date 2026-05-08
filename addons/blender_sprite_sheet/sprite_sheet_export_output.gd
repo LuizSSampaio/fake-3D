@@ -4,6 +4,7 @@ extends RefCounted
 const Paths := preload("res://addons/blender_sprite_sheet/sprite_sheet_export_paths.gd")
 const Layout := preload("res://addons/blender_sprite_sheet/sprite_sheet_export_layout.gd")
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
+const NormalMap := preload("res://addons/blender_sprite_sheet/sprite_sheet_normal_map.gd")
 
 const METADATA_FORMAT := "blender_sprite_sheet.metadata"
 const METADATA_VERSION := 1
@@ -94,6 +95,7 @@ static func _validate_common_settings(settings: Dictionary, has_loaded_source: b
 	normalized_settings["turntable_enabled"] = bool(settings.get("turntable_enabled", false))
 	normalized_settings["turntable_degrees"] = turntable_degrees
 	normalized_settings["output_format"] = output_format
+	normalized_settings["export_normal_map"] = bool(settings.get("export_normal_map", false))
 	normalized_settings = RenderOptions.normalize(normalized_settings)
 
 	var capture_validation := RenderOptions.validate_capture_size(Vector2i(frame_width, frame_height), normalized_settings)
@@ -106,7 +108,7 @@ static func _validate_common_settings(settings: Dictionary, has_loaded_source: b
 	}
 
 
-static func export_images(frames: Array[Image], settings: Dictionary) -> Dictionary:
+static func export_images(frames: Array[Image], settings: Dictionary, normal_frames: Array[Image] = []) -> Dictionary:
 	if frames.is_empty():
 		return _failure("No rendered frames were available to export.")
 
@@ -118,6 +120,11 @@ static func export_images(frames: Array[Image], settings: Dictionary) -> Diction
 	var output_format := Paths.normalize_output_format(settings.get("output_format", Paths.DEFAULT_OUTPUT_FORMAT))
 	if output_format.is_empty():
 		return _failure("Unsupported export format: \"%s\"." % str(settings.get("output_format", "")).strip_edges())
+
+	if bool(settings.get("export_normal_map", false)):
+		var normal_validation := NormalMap.validate_frames(normal_frames, frames.size())
+		if not normal_validation.ok:
+			return normal_validation
 
 	var output_path := Paths.normalize_output_path(str(settings["output_path"]), output_format)
 	var planned_paths := Paths.get_export_paths(output_path, frames.size(), settings)
@@ -144,6 +151,15 @@ static func export_images(frames: Array[Image], settings: Dictionary) -> Diction
 				return _failure("Image encoding failed for frame %d: %s." % [index, error_string(frame_error)])
 			exported_paths.append(frame_paths[index])
 
+	if bool(settings.get("export_normal_map", false)):
+		var normal_map_settings := settings.duplicate()
+		normal_map_settings["frame_count"] = frames.size()
+		var normal_map_result := NormalMap.export_maps(normal_frames, normal_map_settings)
+		if not normal_map_result.ok:
+			Paths._delete_exported_paths(exported_paths)
+			return normal_map_result
+		exported_paths.append_array(normal_map_result.paths)
+
 	var layout := Layout.calculate_layout(frames.size(), columns, frame_width, frame_height, frame_spacing)
 	if bool(settings.get("export_metadata", false)):
 		var metadata_path := Paths.get_metadata_path(output_path)
@@ -169,10 +185,10 @@ static func export_images(frames: Array[Image], settings: Dictionary) -> Diction
 	}
 
 
-static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionary:
+static func export_pngs(frames: Array[Image], settings: Dictionary, normal_frames: Array[Image] = []) -> Dictionary:
 	var png_settings := settings.duplicate()
 	png_settings["output_format"] = "png"
-	return export_images(frames, png_settings)
+	return export_images(frames, png_settings, normal_frames)
 
 
 static func build_metadata(frame_count: int, settings: Dictionary, layout := {}) -> Dictionary:
@@ -194,7 +210,7 @@ static func build_metadata(frame_count: int, settings: Dictionary, layout := {})
 			"height": frame_height,
 		})
 
-	return {
+	var metadata := {
 		"format": METADATA_FORMAT,
 		"version": METADATA_VERSION,
 		"source_path": str(settings.get("source_path", "")),
@@ -215,6 +231,12 @@ static func build_metadata(frame_count: int, settings: Dictionary, layout := {})
 		"turntable_degrees": float(settings.get("turntable_degrees", 360.0)),
 		"frames": frames,
 	}
+
+	if bool(settings.get("export_normal_map", false)):
+		metadata["normal_map_path"] = NormalMap.get_output_path(str(settings.get("output_path", "")))
+		metadata["normal_frame_paths"] = Array(NormalMap.get_individual_frame_paths(str(settings.get("output_path", "")), frame_count))
+
+	return metadata
 
 
 static func write_metadata(metadata_path: String, metadata: Dictionary) -> Dictionary:

@@ -495,6 +495,11 @@ static func create_export_controls(dock: VBoxContainer) -> Control:
 	dock._export_individual_frames_check.text = "Export individual frames"
 	output_controls.add_child(dock._export_individual_frames_check)
 
+	dock._export_normal_map_check = CheckBox.new()
+	dock._export_normal_map_check.text = "Export 2D normal map"
+	dock._export_normal_map_check.tooltip_text = "Write PNG normal map sidecars for Godot 2D lighting."
+	output_controls.add_child(dock._export_normal_map_check)
+
 	dock._export_metadata_check = CheckBox.new()
 	dock._export_metadata_check.text = "Export metadata JSON"
 	output_controls.add_child(dock._export_metadata_check)

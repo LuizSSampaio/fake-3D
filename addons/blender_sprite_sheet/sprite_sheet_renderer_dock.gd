@@ -87,6 +87,7 @@ var _animation_frame_label: Label
 var _avoid_duplicate_loop_frame_check: CheckBox
 var _output_path_edit: LineEdit
 var _export_individual_frames_check: CheckBox
+var _export_normal_map_check: CheckBox
 var _export_metadata_check: CheckBox
 var _export_sprite_frames_check: CheckBox
 var _overwrite_existing_check: CheckBox
@@ -586,6 +587,11 @@ func _create_export_controls() -> Control:
 	_export_individual_frames_check = CheckBox.new()
 	_export_individual_frames_check.text = "Export individual frames"
 	output_controls.add_child(_export_individual_frames_check)
+
+	_export_normal_map_check = CheckBox.new()
+	_export_normal_map_check.text = "Export 2D normal map"
+	_export_normal_map_check.tooltip_text = "Write PNG normal map sidecars for Godot 2D lighting."
+	output_controls.add_child(_export_normal_map_check)
 
 	_export_metadata_check = CheckBox.new()
 	_export_metadata_check.text = "Export metadata JSON"
@@ -1437,6 +1443,7 @@ func _apply_scene_settings(profile: Dictionary) -> void:
 		ControlFactory.select_option_by_id(_anisotropic_filtering_option, int(render_settings["anisotropic_filtering"]))
 		_select_output_format(export_settings.get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT))
 		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
+		_export_normal_map_check.button_pressed = bool(export_settings.get("export_normal_map", _export_normal_map_check.button_pressed))
 		_export_metadata_check.button_pressed = bool(export_settings.get("export_metadata", _export_metadata_check.button_pressed))
 		_export_sprite_frames_check.button_pressed = bool(export_settings.get("export_sprite_frames", _export_sprite_frames_check.button_pressed))
 		_overwrite_existing_check.button_pressed = bool(export_settings.get("overwrite_existing", _overwrite_existing_check.button_pressed))
@@ -1538,6 +1545,7 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		ControlFactory.select_option_by_id(_anisotropic_filtering_option, int(render_settings["anisotropic_filtering"]))
 		_select_output_format(export_settings.get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT))
 		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
+		_export_normal_map_check.button_pressed = bool(export_settings.get("export_normal_map", _export_normal_map_check.button_pressed))
 		_export_metadata_check.button_pressed = bool(export_settings.get("export_metadata", _export_metadata_check.button_pressed))
 		_export_sprite_frames_check.button_pressed = bool(export_settings.get("export_sprite_frames", _export_sprite_frames_check.button_pressed))
 		_overwrite_existing_check.button_pressed = bool(export_settings.get("overwrite_existing", _overwrite_existing_check.button_pressed))
@@ -1896,6 +1904,7 @@ func _collect_export_settings() -> Dictionary:
 		"output_directory": _output_path_edit.text.strip_edges(),
 		"output_format": _get_selected_output_format(),
 		"export_individual_frames": _export_individual_frames_check.button_pressed,
+		"export_normal_map": _export_normal_map_check.button_pressed,
 		"export_metadata": _export_metadata_check.button_pressed,
 		"export_sprite_frames": _export_sprite_frames_check.button_pressed,
 		"overwrite_existing": _overwrite_existing_check.button_pressed,
@@ -2065,7 +2074,7 @@ func _export_sprite_sheets() -> void:
 	_cancel_export_requested = false
 	_export_button.disabled = false
 	_export_button.text = "Cancel Export"
-	var exported_file_count := 0
+	var all_exported_paths := PackedStringArray()
 	var output_dir := str(export_items[0]["output_path"]).get_base_dir()
 
 	for index in range(export_items.size()):
@@ -2112,7 +2121,12 @@ func _export_sprite_sheets() -> void:
 				_finish_export(_format_capture_failure(source_name, capture_result.message), capture_result.message != Capture.CANCELLED_MESSAGE)
 				return
 
-			export_result = _write_animation_export(capture_result.frames, settings)
+			var animation_normal_capture_result := await _capture_normal_map_frames(settings, frame_size)
+			if not animation_normal_capture_result.ok:
+				_finish_export(_format_capture_failure(source_name, animation_normal_capture_result.message), animation_normal_capture_result.message != Capture.CANCELLED_MESSAGE)
+				return
+
+			export_result = _write_animation_export(capture_result.frames, settings, animation_normal_capture_result.frames)
 		elif _settings_use_turntable(settings):
 			capture_result = await Capture.capture_turntable_frames(
 				_scene_root,
@@ -2128,7 +2142,12 @@ func _export_sprite_sheets() -> void:
 				_finish_export(_format_capture_failure(source_name, capture_result.message), capture_result.message != Capture.CANCELLED_MESSAGE)
 				return
 
-			export_result = _write_animation_export(capture_result.frames, settings)
+			var turntable_normal_capture_result := await _capture_normal_map_frames(settings, frame_size)
+			if not turntable_normal_capture_result.ok:
+				_finish_export(_format_capture_failure(source_name, turntable_normal_capture_result.message), turntable_normal_capture_result.message != Capture.CANCELLED_MESSAGE)
+				return
+
+			export_result = _write_animation_export(capture_result.frames, settings, turntable_normal_capture_result.frames)
 		else:
 			capture_result = await Capture.capture_scene(
 				_scene_root,
@@ -2141,19 +2160,24 @@ func _export_sprite_sheets() -> void:
 				_finish_export(_format_capture_failure(source_name, capture_result.message), capture_result.message != Capture.CANCELLED_MESSAGE)
 				return
 
-			export_result = _write_static_export(capture_result.image, settings)
+			var static_normal_capture_result := await _capture_normal_map_frames(settings, frame_size)
+			if not static_normal_capture_result.ok:
+				_finish_export(_format_capture_failure(source_name, static_normal_capture_result.message), static_normal_capture_result.message != Capture.CANCELLED_MESSAGE)
+				return
+
+			export_result = _write_static_export(capture_result.image, settings, static_normal_capture_result.frames)
 
 		if not export_result.ok:
 			_finish_export("Export failed for \"%s\": %s" % [source_name, export_result.message], true)
 			return
 
 		var exported_paths: PackedStringArray = export_result.paths
-		exported_file_count += exported_paths.size()
+		all_exported_paths.append_array(exported_paths)
 
 	_finish_export("Exported %s to \"%s\" (%s)." % [
 		_format_source_count(export_items.size()),
 		output_dir,
-		Exporter.format_export_file_count(exported_file_count, export_items[0].get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT)),
+		Exporter.format_exported_paths(all_exported_paths, export_items[0].get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT)),
 	], false)
 
 
@@ -2174,7 +2198,76 @@ func _settings_use_turntable(settings: Dictionary) -> bool:
 	return bool(settings.get("turntable_enabled", false))
 
 
-func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictionary:
+func _capture_normal_map_frames(settings: Dictionary, frame_size: Vector2i) -> Dictionary:
+	if not bool(settings.get("export_normal_map", false)):
+		return {
+			"ok": true,
+			"frames": [],
+		}
+
+	var capture_result: Dictionary
+	if _settings_use_animation(settings):
+		capture_result = await Capture.capture_animation_normal_frames(
+			_scene_root,
+			frame_size,
+			bool(settings["transparent_background"]),
+			NodePath(str(settings["animation_player_path"])),
+			str(settings["animation_name"]),
+			int(settings["frame_count"]),
+			bool(settings.get("avoid_duplicate_loop_frame", true)),
+			settings,
+			Callable(self, "_is_export_cancel_requested")
+		)
+		if not capture_result.ok:
+			return capture_result
+
+		return {
+			"ok": true,
+			"frames": capture_result.frames,
+		}
+
+	if _settings_use_turntable(settings):
+		capture_result = await Capture.capture_turntable_normal_frames(
+			_scene_root,
+			_scene_root.get_path_to(_object_root),
+			frame_size,
+			bool(settings["transparent_background"]),
+			int(settings["frame_count"]),
+			float(settings.get("turntable_degrees", 360.0)),
+			settings,
+			Callable(self, "_is_export_cancel_requested")
+		)
+		if not capture_result.ok:
+			return capture_result
+
+		return {
+			"ok": true,
+			"frames": capture_result.frames,
+		}
+
+	capture_result = await Capture.capture_scene_normal_map(
+		_scene_root,
+		frame_size,
+		bool(settings["transparent_background"]),
+		settings,
+		Callable(self, "_is_export_cancel_requested")
+	)
+	if not capture_result.ok:
+		return capture_result
+
+	return {
+		"ok": true,
+		"frames": Exporter.build_repeated_frames(
+			capture_result.image,
+			int(settings["frame_count"]),
+			int(settings["frame_width"]),
+			int(settings["frame_height"]),
+			RenderOptions.get_resize_filter(settings)
+		),
+	}
+
+
+func _write_static_export(captured_frame: Image, settings: Dictionary, normal_frames: Array[Image] = []) -> Dictionary:
 	if captured_frame == null or captured_frame.is_empty():
 		return {
 			"ok": false,
@@ -2188,11 +2281,11 @@ func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictio
 		int(settings["frame_height"]),
 		RenderOptions.get_resize_filter(settings)
 	)
-	return Exporter.export_images(frames, settings)
+	return Exporter.export_images(frames, settings, normal_frames)
 
 
-func _write_animation_export(frames: Array[Image], settings: Dictionary) -> Dictionary:
-	return Exporter.export_images(frames, settings)
+func _write_animation_export(frames: Array[Image], settings: Dictionary, normal_frames: Array[Image] = []) -> Dictionary:
+	return Exporter.export_images(frames, settings, normal_frames)
 
 
 func _finish_export(message: String, is_error: bool) -> void:

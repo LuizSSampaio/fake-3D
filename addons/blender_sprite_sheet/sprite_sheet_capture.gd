@@ -3,11 +3,28 @@ extends RefCounted
 
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
 const AnimationUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_animation_utils.gd")
+const NormalMap := preload("res://addons/blender_sprite_sheet/sprite_sheet_normal_map.gd")
 
 const CANCELLED_MESSAGE := "Export cancelled."
 
 
 static func capture_scene(scene_root: Node3D, frame_size: Vector2i, transparent_background: bool, render_settings := {}, cancel_callback := Callable()) -> Dictionary:
+	return await _capture_scene(scene_root, frame_size, transparent_background, render_settings, cancel_callback)
+
+
+static func capture_scene_normal_map(scene_root: Node3D, frame_size: Vector2i, transparent_background: bool, render_settings := {}, cancel_callback := Callable()) -> Dictionary:
+	return await _capture_scene(scene_root, frame_size, true, render_settings, cancel_callback, true, transparent_background)
+
+
+static func _capture_scene(
+	scene_root: Node3D,
+	frame_size: Vector2i,
+	viewport_transparent_background: bool,
+	render_settings := {},
+	cancel_callback := Callable(),
+	normal_map_pass := false,
+	normal_map_transparent_background := true
+) -> Dictionary:
 	if scene_root == null:
 		return _failure("Preview scene is not available for capture.")
 
@@ -26,12 +43,14 @@ static func capture_scene(scene_root: Node3D, frame_size: Vector2i, transparent_
 	var viewport := SubViewport.new()
 	viewport.size = capture_validation.capture_size
 	viewport.own_world_3d = true
-	viewport.transparent_bg = transparent_background
+	viewport.transparent_bg = viewport_transparent_background
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	RenderOptions.apply_to_viewport(viewport, normalized_render_settings)
 	tree.root.add_child(viewport)
 
 	var captured_scene := scene_root.duplicate()
+	if normal_map_pass:
+		NormalMap.apply_to_model(captured_scene)
 	viewport.add_child(captured_scene)
 
 	for _index in range(RenderOptions.get_capture_frame_count(normalized_render_settings)):
@@ -40,26 +59,15 @@ static func capture_scene(scene_root: Node3D, frame_size: Vector2i, transparent_
 			return _failure(CANCELLED_MESSAGE)
 		await tree.process_frame
 
-	var texture := viewport.get_texture()
-	if texture == null or not texture.get_rid().is_valid():
-		viewport.queue_free()
-		return _failure("Preview viewport did not produce a render texture.")
-
-	var image := texture.get_image()
+	var frame_result := _read_viewport_image(viewport, frame_size, normalized_render_settings, normal_map_pass, normal_map_transparent_background)
 	viewport.queue_free()
 
-	if image == null or image.is_empty():
-		return _failure("Preview viewport capture produced an empty image.")
-
-	if image.get_size() != frame_size:
-		image.resize(frame_size.x, frame_size.y, RenderOptions.get_resize_filter(normalized_render_settings))
-
-	if image.get_format() != Image.FORMAT_RGBA8:
-		image.convert(Image.FORMAT_RGBA8)
+	if not frame_result.ok:
+		return frame_result
 
 	return {
 		"ok": true,
-		"image": image,
+		"image": frame_result.image,
 	}
 
 
@@ -73,6 +81,58 @@ static func capture_animation_frames(
 	avoid_duplicate_loop_frame: bool,
 	render_settings := {},
 	cancel_callback := Callable()
+) -> Dictionary:
+	return await _capture_animation_frames(
+		scene_root,
+		frame_size,
+		transparent_background,
+		animation_player_path,
+		animation_name,
+		frame_count,
+		avoid_duplicate_loop_frame,
+		render_settings,
+		cancel_callback
+	)
+
+
+static func capture_animation_normal_frames(
+	scene_root: Node3D,
+	frame_size: Vector2i,
+	transparent_background: bool,
+	animation_player_path: NodePath,
+	animation_name: String,
+	frame_count: int,
+	avoid_duplicate_loop_frame: bool,
+	render_settings := {},
+	cancel_callback := Callable()
+) -> Dictionary:
+	return await _capture_animation_frames(
+		scene_root,
+		frame_size,
+		true,
+		animation_player_path,
+		animation_name,
+		frame_count,
+		avoid_duplicate_loop_frame,
+		render_settings,
+		cancel_callback,
+		true,
+		transparent_background
+	)
+
+
+static func _capture_animation_frames(
+	scene_root: Node3D,
+	frame_size: Vector2i,
+	viewport_transparent_background: bool,
+	animation_player_path: NodePath,
+	animation_name: String,
+	frame_count: int,
+	avoid_duplicate_loop_frame: bool,
+	render_settings := {},
+	cancel_callback := Callable(),
+	normal_map_pass := false,
+	normal_map_transparent_background := true
 ) -> Dictionary:
 	if scene_root == null:
 		return _failure("Preview scene is not available for capture.")
@@ -95,12 +155,14 @@ static func capture_animation_frames(
 	var viewport := SubViewport.new()
 	viewport.size = capture_validation.capture_size
 	viewport.own_world_3d = true
-	viewport.transparent_bg = transparent_background
+	viewport.transparent_bg = viewport_transparent_background
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	RenderOptions.apply_to_viewport(viewport, normalized_render_settings)
 	tree.root.add_child(viewport)
 
 	var captured_scene := scene_root.duplicate()
+	if normal_map_pass:
+		NormalMap.apply_to_model(captured_scene)
 	viewport.add_child(captured_scene)
 
 	var animation_player := captured_scene.get_node_or_null(animation_player_path) as AnimationPlayer
@@ -135,7 +197,7 @@ static func capture_animation_frames(
 				return _failure(CANCELLED_MESSAGE)
 			await tree.process_frame
 
-		var frame_result := _read_viewport_image(viewport, frame_size, normalized_render_settings)
+		var frame_result := _read_viewport_image(viewport, frame_size, normalized_render_settings, normal_map_pass, normal_map_transparent_background)
 		if not frame_result.ok:
 			viewport.queue_free()
 			return frame_result
@@ -160,6 +222,54 @@ static func capture_turntable_frames(
 	render_settings := {},
 	cancel_callback := Callable()
 ) -> Dictionary:
+	return await _capture_turntable_frames(
+		scene_root,
+		object_root_path,
+		frame_size,
+		transparent_background,
+		frame_count,
+		turntable_degrees,
+		render_settings,
+		cancel_callback
+	)
+
+
+static func capture_turntable_normal_frames(
+	scene_root: Node3D,
+	object_root_path: NodePath,
+	frame_size: Vector2i,
+	transparent_background: bool,
+	frame_count: int,
+	turntable_degrees: float,
+	render_settings := {},
+	cancel_callback := Callable()
+) -> Dictionary:
+	return await _capture_turntable_frames(
+		scene_root,
+		object_root_path,
+		frame_size,
+		true,
+		frame_count,
+		turntable_degrees,
+		render_settings,
+		cancel_callback,
+		true,
+		transparent_background
+	)
+
+
+static func _capture_turntable_frames(
+	scene_root: Node3D,
+	object_root_path: NodePath,
+	frame_size: Vector2i,
+	viewport_transparent_background: bool,
+	frame_count: int,
+	turntable_degrees: float,
+	render_settings := {},
+	cancel_callback := Callable(),
+	normal_map_pass := false,
+	normal_map_transparent_background := true
+) -> Dictionary:
 	if scene_root == null:
 		return _failure("Preview scene is not available for capture.")
 
@@ -181,12 +291,14 @@ static func capture_turntable_frames(
 	var viewport := SubViewport.new()
 	viewport.size = capture_validation.capture_size
 	viewport.own_world_3d = true
-	viewport.transparent_bg = transparent_background
+	viewport.transparent_bg = viewport_transparent_background
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	RenderOptions.apply_to_viewport(viewport, normalized_render_settings)
 	tree.root.add_child(viewport)
 
 	var captured_scene := scene_root.duplicate()
+	if normal_map_pass:
+		NormalMap.apply_to_model(captured_scene)
 	viewport.add_child(captured_scene)
 
 	var captured_object_root := captured_scene.get_node_or_null(object_root_path) as Node3D
@@ -209,7 +321,7 @@ static func capture_turntable_frames(
 				return _failure(CANCELLED_MESSAGE)
 			await tree.process_frame
 
-		var frame_result := _read_viewport_image(viewport, frame_size, normalized_render_settings)
+		var frame_result := _read_viewport_image(viewport, frame_size, normalized_render_settings, normal_map_pass, normal_map_transparent_background)
 		if not frame_result.ok:
 			viewport.queue_free()
 			return frame_result
@@ -266,7 +378,13 @@ static func _is_cancelled(cancel_callback: Callable) -> bool:
 	return cancel_callback.is_valid() and bool(cancel_callback.call())
 
 
-static func _read_viewport_image(viewport: SubViewport, frame_size: Vector2i, render_settings: Dictionary) -> Dictionary:
+static func _read_viewport_image(
+	viewport: SubViewport,
+	frame_size: Vector2i,
+	render_settings: Dictionary,
+	normal_map_pass := false,
+	normal_map_transparent_background := true
+) -> Dictionary:
 	var texture := viewport.get_texture()
 	if texture == null or not texture.get_rid().is_valid():
 		return _failure("Preview viewport did not produce a render texture.")
@@ -280,6 +398,9 @@ static func _read_viewport_image(viewport: SubViewport, frame_size: Vector2i, re
 
 	if image.get_format() != Image.FORMAT_RGBA8:
 		image.convert(Image.FORMAT_RGBA8)
+
+	if normal_map_pass:
+		image = NormalMap.finalize_capture(image, normal_map_transparent_background)
 
 	return {
 		"ok": true,
