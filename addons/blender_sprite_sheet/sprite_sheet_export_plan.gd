@@ -61,7 +61,8 @@ static func _settings_for_source(base_settings: Dictionary, source_path: String,
 		source_path,
 		name_pattern,
 		index,
-		count
+		count,
+		base_settings.get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT)
 	)
 	return item_settings
 

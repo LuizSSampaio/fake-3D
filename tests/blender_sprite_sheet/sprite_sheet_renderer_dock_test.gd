@@ -56,6 +56,7 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_bool(_dock._source_clear_button.disabled).is_true()
 	assert_str(_dock._output_path_edit.placeholder_text).is_equal("res://exports")
 	assert_str(_dock._name_pattern_edit.text).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_NAME_PATTERN)
+	assert_str(_dock._get_selected_output_format()).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_FORMAT)
 	assert_bool(_dock._background_color_picker.disabled).is_true()
 	assert_object(_dock._object_root).is_not_null()
 	assert_vector(_dock._object_root.position).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_POSITION)
@@ -132,7 +133,7 @@ func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> 
 	assert_int(_dock._get_option_id(_dock._supersample_option, -1)).is_equal(RenderOptions.DEFAULT_SUPERSAMPLE_SCALE)
 	assert_int(_dock._get_option_id(_dock._resize_filter_option, -1)).is_equal(RenderOptions.DEFAULT_RESIZE_FILTER)
 	assert_int(_dock._get_option_id(_dock._anisotropic_filtering_option, -1)).is_equal(RenderOptions.DEFAULT_ANISOTROPIC_FILTERING)
-	assert_str(_dock._export_result_label.text).is_equal("PNG export is ready after source models are loaded.")
+	assert_str(_dock._export_result_label.text).is_equal("Image export is ready after source models are loaded.")
 
 
 func test_animation_sampling_times_can_avoid_loop_endpoint() -> void:
@@ -325,7 +326,7 @@ func test_editor_panel_uses_style_guide_button_text_and_tooltips() -> void:
 	var output_path_row: Node = _dock._output_path_edit.get_parent()
 	var output_browse_button := output_path_row.get_child(output_path_row.get_child_count() - 1) as Button
 	assert_str(output_browse_button.text).is_equal("Browse...")
-	assert_str(_dock._output_path_edit.tooltip_text).is_equal("Choose where generated PNG files will be written.")
+	assert_str(_dock._output_path_edit.tooltip_text).is_equal("Choose where generated image files will be written.")
 	assert_str(_dock._name_pattern_edit.tooltip_text).contains("\n")
 
 
@@ -421,6 +422,26 @@ func test_render_quality_controls_update_preview_and_export_settings() -> void:
 	assert_int(settings.supersample_scale).is_equal(2)
 	assert_int(settings.resize_filter).is_equal(Image.INTERPOLATE_CUBIC)
 	assert_int(settings.anisotropic_filtering).is_equal(Viewport.ANISOTROPY_16X)
+
+
+func test_output_format_control_updates_export_settings() -> void:
+	assert_int(_dock._output_format_option.item_count).is_equal(SpriteSheetExporter.get_output_format_options().size())
+
+	_dock._select_output_format("webp")
+	var settings: Dictionary = _dock._collect_export_settings()
+
+	assert_str(_dock._get_selected_output_format()).is_equal("webp")
+	assert_str(settings.output_format).is_equal("webp")
+	assert_str(_dock._name_pattern_edit.text).is_equal("{model}.webp")
+	assert_str(settings.name_pattern).is_equal("{model}.webp")
+
+	_dock._select_output_format("jpeg")
+	settings = _dock._collect_export_settings()
+
+	assert_str(_dock._get_selected_output_format()).is_equal("jpg")
+	assert_str(settings.output_format).is_equal("jpg")
+	assert_str(_dock._name_pattern_edit.text).is_equal("{model}.jpg")
+	assert_str(settings.name_pattern).is_equal("{model}.jpg")
 
 
 func test_apply_material_settings_sets_and_clears_surface_overrides() -> void:
@@ -554,6 +575,7 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	_select_option_by_id(_dock._supersample_option, 2)
 	_select_option_by_id(_dock._resize_filter_option, Image.INTERPOLATE_CUBIC)
 	_select_option_by_id(_dock._anisotropic_filtering_option, Viewport.ANISOTROPY_16X)
+	_dock._select_output_format("webp")
 	_dock._export_individual_frames_check.button_pressed = true
 	_dock._name_pattern_edit.text = "{index}_{model}.png"
 	var profile_base_path := _temp_resource_path("book_profile")
@@ -604,8 +626,9 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	assert_int(int(profile.export.supersample_scale)).is_equal(2)
 	assert_int(int(profile.export.resize_filter)).is_equal(Image.INTERPOLATE_CUBIC)
 	assert_int(int(profile.export.anisotropic_filtering)).is_equal(Viewport.ANISOTROPY_16X)
+	assert_str(profile.export.output_format).is_equal("webp")
 	assert_bool(bool(profile.export.export_individual_frames)).is_true()
-	assert_str(profile.export.name_pattern).is_equal("{index}_{model}.png")
+	assert_str(profile.export.name_pattern).is_equal("{index}_{model}.webp")
 
 
 func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> void:
@@ -669,6 +692,7 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 			"supersample_scale": 2,
 			"resize_filter": Image.INTERPOLATE_CUBIC,
 			"anisotropic_filtering": Viewport.ANISOTROPY_16X,
+			"output_format": "jpg",
 			"export_individual_frames": true,
 			"name_pattern": "{model}_{index}.png",
 			"output_directory": output_dir,
@@ -713,8 +737,9 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	assert_int(_dock._viewport.screen_space_aa).is_equal(Viewport.SCREEN_SPACE_AA_FXAA)
 	assert_bool(_dock._viewport.use_taa).is_true()
 	assert_int(_dock._viewport.anisotropic_filtering_level).is_equal(Viewport.ANISOTROPY_16X)
+	assert_str(_dock._get_selected_output_format()).is_equal("jpg")
 	assert_bool(_dock._export_individual_frames_check.button_pressed).is_true()
-	assert_str(_dock._name_pattern_edit.text).is_equal("{model}_{index}.png")
+	assert_str(_dock._name_pattern_edit.text).is_equal("{model}_{index}.jpg")
 	assert_str(_dock._output_path_edit.text).is_equal(output_dir)
 
 	_dock._load_source(_save_test_scene("profiled_model.tscn"))
@@ -907,9 +932,11 @@ func test_exporter_formats_source_output_paths_from_pattern() -> void:
 
 	var formatted_name := SpriteSheetExporter.format_output_name("{output}_{index}_{model}.png", source_path, 1, 12, output_path)
 	var source_output_path := SpriteSheetExporter.get_source_output_path(output_path, source_path, "{output}_{index}_{model}", 1, 12)
+	var webp_source_output_path := SpriteSheetExporter.get_source_output_path(output_path, source_path, "{output}_{index}_{model}.png", 1, 12, "webp")
 
 	assert_str(formatted_name).is_equal("exports_002_Book Scene.png")
 	assert_str(source_output_path).is_equal("res://exports/exports_002_Book Scene.png")
+	assert_str(webp_source_output_path).is_equal("res://exports/exports_002_Book Scene.webp")
 
 
 func test_export_validation_builds_source_output_paths_from_pattern() -> void:
@@ -931,6 +958,52 @@ func test_export_validation_builds_source_output_paths_from_pattern() -> void:
 	assert_str(items[1].output_path).ends_with("002_source_validate_second.png")
 	assert_str(items[0].source_path).is_equal(first_path)
 	assert_str(items[1].source_path).is_equal(second_path)
+
+
+func test_export_validation_uses_selected_output_format_for_generated_paths() -> void:
+	var source_path := _save_test_scene("source_validate_webp.tscn")
+	var paths := PackedStringArray()
+	paths.append(source_path)
+	_dock._set_source_paths(paths, false)
+	_dock._output_path_edit.text = _temp_resource_directory()
+	_dock._name_pattern_edit.text = "{model}.png"
+	_dock._select_output_format("webp")
+
+	var validation: Dictionary = _dock._validate_export_settings()
+
+	assert_bool(validation.ok).is_true()
+	assert_str(validation.settings.output_format).is_equal("webp")
+	assert_str(validation.settings.name_pattern).is_equal("{model}.webp")
+	assert_str(validation.settings.output_path).ends_with("source_validate_webp.webp")
+
+
+func test_export_validation_normalizes_supported_formats_and_rejects_unknown_format() -> void:
+	var output_directory := _temp_resource_directory()
+	var settings := {
+		"frame_width": 4,
+		"frame_height": 4,
+		"frame_count": 1,
+		"columns": 1,
+		"frame_spacing": 0,
+		"output_path": output_directory.path_join("sheet.png"),
+	}
+
+	for output_format in ["png", "webp", "jpeg"]:
+		var format_settings: Dictionary = settings.duplicate()
+		format_settings["output_format"] = output_format
+		var validation := SpriteSheetExporter.validate_export_settings(format_settings, true)
+		var expected_format := SpriteSheetExporter.normalize_output_format(output_format)
+
+		assert_bool(validation.ok).is_true()
+		assert_str(validation.settings.output_format).is_equal(expected_format)
+		assert_str(validation.settings.output_path).ends_with(".%s" % SpriteSheetExporter.get_output_format_extension(expected_format))
+
+	var invalid_settings: Dictionary = settings.duplicate()
+	invalid_settings["output_format"] = "bmp"
+	var invalid_validation := SpriteSheetExporter.validate_export_settings(invalid_settings, true)
+
+	assert_bool(invalid_validation.ok).is_false()
+	assert_str(invalid_validation.message).contains("Unsupported export format")
 
 
 func test_export_validation_rejects_duplicate_generated_names() -> void:
@@ -995,6 +1068,42 @@ func test_exporter_writes_sprite_sheet_and_individual_png_frames() -> void:
 	var sheet := Image.load_from_file(output_path)
 	assert_object(sheet).is_not_null()
 	assert_vector(sheet.get_size()).is_equal(Vector2i(9, 4))
+
+
+func test_exporter_writes_supported_image_formats() -> void:
+	var frames: Array[Image] = [
+		_create_color_image(4, 4, Color(1.0, 0.0, 0.0, 1.0)),
+		_create_color_image(4, 4, Color(0.0, 1.0, 0.0, 1.0)),
+	]
+
+	for output_format in ["webp", "jpg"]:
+		var extension := SpriteSheetExporter.get_output_format_extension(output_format)
+		var output_path := _temp_resource_path("static_export.%s" % extension)
+		var settings := {
+			"frame_width": 4,
+			"frame_height": 4,
+			"frame_count": 2,
+			"columns": 2,
+			"frame_spacing": 1,
+			"output_path": output_path,
+			"output_format": output_format,
+			"export_individual_frames": true,
+		}
+
+		var export_result := SpriteSheetExporter.export_images(frames, settings)
+		var frame_paths := SpriteSheetExporter.get_individual_frame_paths(output_path, 2, output_format)
+
+		assert_bool(export_result.ok).is_true()
+		assert_str(export_result.message).contains(SpriteSheetExporter.get_output_format_label(output_format))
+		assert_bool(FileAccess.file_exists(output_path)).is_true()
+		assert_bool(FileAccess.file_exists(frame_paths[0])).is_true()
+		assert_bool(FileAccess.file_exists(frame_paths[1])).is_true()
+		assert_str(frame_paths[0]).ends_with("_000.%s" % extension)
+		assert_str(frame_paths[1]).ends_with("_001.%s" % extension)
+
+		var sheet := Image.load_from_file(output_path)
+		assert_object(sheet).is_not_null()
+		assert_vector(sheet.get_size()).is_equal(Vector2i(9, 4))
 
 
 func test_dock_single_source_export_writes_sheet_and_repeated_individual_frames_from_capture() -> void:

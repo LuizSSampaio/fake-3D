@@ -75,6 +75,7 @@ var _taa_check: CheckBox
 var _supersample_option: OptionButton
 var _resize_filter_option: OptionButton
 var _anisotropic_filtering_option: OptionButton
+var _output_format_option: OptionButton
 var _animation_option: OptionButton
 var _animation_play_button: Button
 var _animation_timeline: HSlider
@@ -565,7 +566,7 @@ func _create_export_controls() -> Control:
 
 	_output_path_edit = LineEdit.new()
 	_output_path_edit.placeholder_text = "res://exports"
-	_output_path_edit.tooltip_text = "Choose where generated PNG files will be written."
+	_output_path_edit.tooltip_text = "Choose where generated image files will be written."
 	_output_path_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_output_path_edit.text_submitted.connect(_on_output_path_submitted)
 	output_row.add_child(_output_path_edit)
@@ -575,6 +576,9 @@ func _create_export_controls() -> Control:
 	output_browse_button.pressed.connect(_on_output_browse_pressed)
 	output_row.add_child(output_browse_button)
 	output_controls.add_child(output_row)
+
+	_output_format_option = _create_output_format_option()
+	ControlFactory.add_labeled_control(output_controls, "Format", _output_format_option)
 
 	_name_pattern_edit = LineEdit.new()
 	_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
@@ -588,16 +592,27 @@ func _create_export_controls() -> Control:
 	_add_collapsible_section(container, "Output", output_controls, false, true)
 
 	_export_button = Button.new()
-	_export_button.text = "Export PNG"
+	_export_button.text = "Export Sprite Sheet"
 	_export_button.pressed.connect(_on_export_pressed)
 	container.add_child(_export_button)
 
 	_export_result_label = Label.new()
 	_export_result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_export_result_label.text = "PNG export is ready after source models are loaded."
+	_export_result_label.text = "Image export is ready after source models are loaded."
 	container.add_child(_export_result_label)
 
 	return container
+
+
+func _create_output_format_option() -> OptionButton:
+	var option_button := OptionButton.new()
+	for option in Exporter.get_output_format_options():
+		option_button.add_item(str(option["label"]))
+		option_button.set_item_metadata(option_button.item_count - 1, str(option["key"]))
+
+	_select_output_format(Exporter.DEFAULT_OUTPUT_FORMAT, option_button)
+	option_button.item_selected.connect(_on_output_format_selected)
+	return option_button
 
 
 func _create_file_dialogs() -> void:
@@ -758,6 +773,11 @@ func _on_texture_path_submitted(path: String) -> void:
 
 func _on_output_path_submitted(path: String) -> void:
 	_output_path_edit.text = Exporter.normalize_output_directory(path)
+
+
+func _on_output_format_selected(_index: int) -> void:
+	_select_output_format(_get_selected_output_format())
+	_sync_name_pattern_extension()
 
 
 func _on_source_list_item_selected(index: int) -> void:
@@ -1377,10 +1397,12 @@ func _apply_scene_settings(profile: Dictionary) -> void:
 		ControlFactory.select_option_by_id(_supersample_option, int(render_settings["supersample_scale"]))
 		ControlFactory.select_option_by_id(_resize_filter_option, int(render_settings["resize_filter"]))
 		ControlFactory.select_option_by_id(_anisotropic_filtering_option, int(render_settings["anisotropic_filtering"]))
+		_select_output_format(export_settings.get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT))
 		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
 		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
 		if _name_pattern_edit.text.is_empty():
 			_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
+		_sync_name_pattern_extension()
 		var output_directory := str(export_settings.get("output_directory", export_settings.get("output_path", ""))).strip_edges()
 		if not output_directory.is_empty():
 			_output_path_edit.text = Exporter.normalize_output_directory(output_directory)
@@ -1461,10 +1483,12 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		ControlFactory.select_option_by_id(_supersample_option, int(render_settings["supersample_scale"]))
 		ControlFactory.select_option_by_id(_resize_filter_option, int(render_settings["resize_filter"]))
 		ControlFactory.select_option_by_id(_anisotropic_filtering_option, int(render_settings["anisotropic_filtering"]))
+		_select_output_format(export_settings.get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT))
 		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
 		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
 		if _name_pattern_edit.text.is_empty():
 			_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
+		_sync_name_pattern_extension()
 		var output_directory := str(export_settings.get("output_directory", export_settings.get("output_path", ""))).strip_edges()
 		if not output_directory.is_empty():
 			_output_path_edit.text = Exporter.normalize_output_directory(output_directory)
@@ -1789,9 +1813,9 @@ func _collect_export_settings() -> Dictionary:
 		"animation_name": _get_selected_animation_name(),
 		"avoid_duplicate_loop_frame": _avoid_duplicate_loop_frame_check.button_pressed,
 		"output_directory": _output_path_edit.text.strip_edges(),
-		"output_format": "png",
+		"output_format": _get_selected_output_format(),
 		"export_individual_frames": _export_individual_frames_check.button_pressed,
-		"name_pattern": _name_pattern_edit.text.strip_edges(),
+		"name_pattern": Exporter.normalize_name_pattern_extension(_name_pattern_edit.text, _get_selected_output_format()),
 	}
 
 
@@ -1847,6 +1871,44 @@ func _select_projection_id(projection_id: int) -> void:
 			return
 
 	_camera_projection_option.select(0)
+
+
+func _get_selected_output_format() -> String:
+	if _output_format_option == null or _output_format_option.selected < 0:
+		return Exporter.DEFAULT_OUTPUT_FORMAT
+
+	var metadata := _output_format_option.get_item_metadata(_output_format_option.selected)
+	var output_format := Exporter.normalize_output_format(metadata)
+	return output_format if not output_format.is_empty() else Exporter.DEFAULT_OUTPUT_FORMAT
+
+
+func _select_output_format(value: Variant, option_button: OptionButton = null) -> void:
+	var target := option_button if option_button != null else _output_format_option
+	if target == null:
+		return
+
+	var output_format := Exporter.normalize_output_format(value)
+	if output_format.is_empty():
+		output_format = Exporter.DEFAULT_OUTPUT_FORMAT
+
+	for index in range(target.item_count):
+		if Exporter.normalize_output_format(target.get_item_metadata(index)) == output_format:
+			target.select(index)
+			if target == _output_format_option:
+				_sync_name_pattern_extension()
+			return
+
+	if target.item_count > 0:
+		target.select(0)
+		if target == _output_format_option:
+			_sync_name_pattern_extension()
+
+
+func _sync_name_pattern_extension() -> void:
+	if _name_pattern_edit == null:
+		return
+
+	_name_pattern_edit.text = Exporter.normalize_name_pattern_extension(_name_pattern_edit.text, _get_selected_output_format())
 
 
 func _validate_export_settings() -> Dictionary:
@@ -1950,7 +2012,7 @@ func _export_sprite_sheets() -> void:
 	_finish_export("Exported %s to \"%s\" (%s)." % [
 		_format_source_count(export_items.size()),
 		output_dir,
-		_format_png_count(exported_file_count),
+		Exporter.format_export_file_count(exported_file_count, export_items[0].get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT)),
 	], false)
 
 
@@ -1981,11 +2043,11 @@ func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictio
 		int(settings["frame_height"]),
 		RenderOptions.get_resize_filter(settings)
 	)
-	return Exporter.export_pngs(frames, settings)
+	return Exporter.export_images(frames, settings)
 
 
 func _write_animation_export(frames: Array[Image], settings: Dictionary) -> Dictionary:
-	return Exporter.export_pngs(frames, settings)
+	return Exporter.export_images(frames, settings)
 
 
 func _finish_export(message: String, is_error: bool) -> void:
@@ -2032,7 +2094,3 @@ func _get_editor_theme_color(color_name: String, fallback: Color) -> Color:
 
 func _format_source_count(count: int) -> String:
 	return "%d source %s" % [count, "model" if count == 1 else "models"]
-
-
-func _format_png_count(count: int) -> String:
-	return "%d PNG %s" % [count, "file" if count == 1 else "files"]

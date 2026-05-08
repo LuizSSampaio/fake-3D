@@ -5,6 +5,12 @@ const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_r
 
 const DEFAULT_FRAME_DIGITS := 3
 const DEFAULT_OUTPUT_NAME_PATTERN := "{model}.png"
+const DEFAULT_OUTPUT_FORMAT := "png"
+const OUTPUT_FORMATS := [
+	{"label": "PNG", "key": "png", "extension": "png"},
+	{"label": "WebP", "key": "webp", "extension": "webp"},
+	{"label": "JPEG", "key": "jpg", "extension": "jpg", "aliases": ["jpeg"]},
+]
 
 
 static func validate_export_settings(settings: Dictionary, has_loaded_source: bool) -> Dictionary:
@@ -13,13 +19,11 @@ static func validate_export_settings(settings: Dictionary, has_loaded_source: bo
 		return base_validation
 
 	var normalized_settings: Dictionary = base_validation.settings
-	var output_path := normalize_png_output_path(str(settings.get("output_path", "")))
+	var output_format := str(normalized_settings["output_format"])
+	var output_path := normalize_output_path(str(settings.get("output_path", "")), output_format)
 
 	if output_path.is_empty():
-		return _failure("Choose an output PNG path before exporting.")
-
-	if output_path.get_extension().to_lower() != "png":
-		return _failure("Output format must be PNG for static sprite export.")
+		return _failure("Choose an output path before exporting.")
 
 	var base_dir := output_path.get_base_dir()
 	if base_dir.is_empty() or not _directory_exists(base_dir):
@@ -76,12 +80,17 @@ static func _validate_common_settings(settings: Dictionary, has_loaded_source: b
 	if frame_spacing < 0:
 		return _failure("Frame spacing can't be negative.")
 
+	var output_format := normalize_output_format(settings.get("output_format", DEFAULT_OUTPUT_FORMAT))
+	if output_format.is_empty():
+		return _failure("Unsupported export format: \"%s\"." % str(settings.get("output_format", "")).strip_edges())
+
 	var normalized_settings := settings.duplicate()
 	normalized_settings["frame_width"] = frame_width
 	normalized_settings["frame_height"] = frame_height
 	normalized_settings["frame_count"] = frame_count
 	normalized_settings["columns"] = columns
 	normalized_settings["frame_spacing"] = frame_spacing
+	normalized_settings["output_format"] = output_format
 	normalized_settings = RenderOptions.normalize(normalized_settings)
 
 	var capture_validation := RenderOptions.validate_capture_size(Vector2i(frame_width, frame_height), normalized_settings)
@@ -94,15 +103,91 @@ static func _validate_common_settings(settings: Dictionary, has_loaded_source: b
 	}
 
 
-static func normalize_png_output_path(path: String) -> String:
+static func get_output_format_options() -> Array[Dictionary]:
+	var options: Array[Dictionary] = []
+	for option in OUTPUT_FORMATS:
+		options.append(option.duplicate(true))
+	return options
+
+
+static func normalize_output_format(value: Variant) -> String:
+	var text_value := str(value).strip_edges().to_lower()
+	if text_value.is_empty():
+		text_value = DEFAULT_OUTPUT_FORMAT
+
+	for option in OUTPUT_FORMATS:
+		if text_value == str(option["key"]) or text_value == str(option["extension"]) or text_value == str(option["label"]).to_lower():
+			return str(option["key"])
+
+		var aliases: Array = option.get("aliases", [])
+		for alias in aliases:
+			if text_value == str(alias).to_lower():
+				return str(option["key"])
+
+	return ""
+
+
+static func get_output_format_extension(output_format: Variant) -> String:
+	var normalized_format := normalize_output_format(output_format)
+	if normalized_format.is_empty():
+		normalized_format = DEFAULT_OUTPUT_FORMAT
+
+	for option in OUTPUT_FORMATS:
+		if normalized_format == str(option["key"]):
+			return str(option["extension"])
+
+	return DEFAULT_OUTPUT_FORMAT
+
+
+static func get_output_format_label(output_format: Variant) -> String:
+	var normalized_format := normalize_output_format(output_format)
+	if normalized_format.is_empty():
+		normalized_format = DEFAULT_OUTPUT_FORMAT
+
+	for option in OUTPUT_FORMATS:
+		if normalized_format == str(option["key"]):
+			return str(option["label"])
+
+	return DEFAULT_OUTPUT_FORMAT.to_upper()
+
+
+static func get_default_output_name_pattern(output_format: Variant = DEFAULT_OUTPUT_FORMAT) -> String:
+	return "{model}.%s" % get_output_format_extension(output_format)
+
+
+static func normalize_name_pattern_extension(pattern: String, output_format: Variant) -> String:
+	var clean_pattern := pattern.strip_edges()
+	if clean_pattern.is_empty():
+		clean_pattern = DEFAULT_OUTPUT_NAME_PATTERN
+
+	var extension := get_output_format_extension(output_format)
+	var current_extension := clean_pattern.get_extension().to_lower()
+	if current_extension.is_empty():
+		return "%s.%s" % [clean_pattern, extension]
+
+	if _is_supported_output_extension(current_extension):
+		return "%s.%s" % [clean_pattern.get_basename(), extension]
+
+	return clean_pattern
+
+
+static func normalize_output_path(path: String, output_format: Variant = DEFAULT_OUTPUT_FORMAT) -> String:
 	var clean_path := path.strip_edges()
 	if clean_path.is_empty():
 		return ""
 
+	var extension := get_output_format_extension(output_format)
 	if clean_path.get_extension().is_empty():
-		return "%s.png" % clean_path
+		return "%s.%s" % [clean_path, extension]
+
+	if clean_path.get_extension().to_lower() != extension:
+		return "%s.%s" % [clean_path.get_basename(), extension]
 
 	return clean_path
+
+
+static func normalize_png_output_path(path: String) -> String:
+	return normalize_output_path(path, "png")
 
 
 static func normalize_output_directory(path: String) -> String:
@@ -140,12 +225,11 @@ static func format_output_name(pattern: String, source_path: String, index: int,
 	return output_name
 
 
-static func get_source_output_path(output_path: String, source_path: String, pattern: String, index: int, count: int) -> String:
+static func get_source_output_path(output_path: String, source_path: String, pattern: String, index: int, count: int, output_format := DEFAULT_OUTPUT_FORMAT) -> String:
 	var base_output_path := output_path.strip_edges()
 	var base_dir := normalize_output_directory(base_output_path)
 	var file_name := format_output_name(pattern, source_path, index, count, base_output_path).strip_edges()
-	if file_name.get_extension().is_empty():
-		file_name = "%s.png" % file_name
+	file_name = normalize_output_path(file_name, output_format)
 
 	if base_dir.is_empty():
 		return file_name
@@ -194,7 +278,7 @@ static func assemble_sprite_sheet(frames: Array[Image], frame_width: int, frame_
 	return sheet
 
 
-static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionary:
+static func export_images(frames: Array[Image], settings: Dictionary) -> Dictionary:
 	if frames.is_empty():
 		return _failure("No rendered frames were available to export.")
 
@@ -203,20 +287,24 @@ static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionar
 	var columns := int(settings["columns"])
 	var frame_spacing := int(settings["frame_spacing"])
 	var resize_filter := RenderOptions.get_resize_filter(settings)
-	var output_path := normalize_png_output_path(str(settings["output_path"]))
+	var output_format := normalize_output_format(settings.get("output_format", DEFAULT_OUTPUT_FORMAT))
+	if output_format.is_empty():
+		return _failure("Unsupported export format: \"%s\"." % str(settings.get("output_format", "")).strip_edges())
+
+	var output_path := normalize_output_path(str(settings["output_path"]), output_format)
 	var exported_paths: PackedStringArray = []
 	var sheet := assemble_sprite_sheet(frames, frame_width, frame_height, columns, frame_spacing, resize_filter)
-	var sheet_error := sheet.save_png(output_path)
+	var sheet_error := _save_image(sheet, output_path, output_format)
 	if sheet_error != OK:
 		return _failure("Image encoding failed for sprite sheet: %s." % error_string(sheet_error))
 
 	exported_paths.append(output_path)
 
 	if bool(settings.get("export_individual_frames", false)):
-		var frame_paths := get_individual_frame_paths(output_path, frames.size())
+		var frame_paths := get_individual_frame_paths(output_path, frames.size(), output_format)
 		for index in range(frames.size()):
 			var frame := _copy_frame_at_size(frames[index], frame_width, frame_height, resize_filter)
-			var frame_error := frame.save_png(frame_paths[index])
+			var frame_error := _save_image(frame, frame_paths[index], output_format)
 			if frame_error != OK:
 				_delete_exported_paths(exported_paths)
 				return _failure("Image encoding failed for frame %d: %s." % [index, error_string(frame_error)])
@@ -225,18 +313,31 @@ static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionar
 	var layout := calculate_layout(frames.size(), columns, frame_width, frame_height, frame_spacing)
 	return {
 		"ok": true,
-		"message": _format_png_count(exported_paths.size()),
+		"message": "Exported %s." % format_export_file_count(exported_paths.size(), output_format),
 		"paths": exported_paths,
 		"sheet_size": layout.sheet_size,
 	}
 
 
-static func get_individual_frame_paths(output_path: String, frame_count: int) -> PackedStringArray:
-	var base_path := normalize_png_output_path(output_path).get_basename()
+static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionary:
+	var png_settings := settings.duplicate()
+	png_settings["output_format"] = "png"
+	return export_images(frames, png_settings)
+
+
+static func get_individual_frame_paths(output_path: String, frame_count: int, output_format := "") -> PackedStringArray:
+	var normalized_format := normalize_output_format(output_format)
+	if normalized_format.is_empty():
+		normalized_format = normalize_output_format(output_path.get_extension())
+	if normalized_format.is_empty():
+		normalized_format = DEFAULT_OUTPUT_FORMAT
+
+	var base_path := normalize_output_path(output_path, normalized_format).get_basename()
+	var extension := get_output_format_extension(normalized_format)
 	var paths: PackedStringArray = []
 	var digits := max(DEFAULT_FRAME_DIGITS, str(max(frame_count - 1, 0)).length())
 	for index in range(frame_count):
-		paths.append("%s_%s.png" % [base_path, str(index).pad_zeros(digits)])
+		paths.append("%s_%s.%s" % [base_path, str(index).pad_zeros(digits), extension])
 	return paths
 
 
@@ -267,7 +368,7 @@ static func _get_output_token_value(output_path: String) -> String:
 		return clean_path.get_file()
 
 	if not clean_path.get_extension().is_empty():
-		return normalize_png_output_path(clean_path).get_file().get_basename()
+		return clean_path.get_file().get_basename()
 
 	return clean_path.get_file()
 
@@ -283,12 +384,31 @@ static func _strip_trailing_slashes(path: String) -> String:
 static func _delete_exported_paths(paths: PackedStringArray) -> void:
 	for path in paths:
 		var absolute_path := ProjectSettings.globalize_path(path) if path.begins_with("res://") or path.begins_with("user://") else path
-		if FileAccess.file_exists(path):
+		if FileAccess.file_exists(absolute_path):
 			DirAccess.remove_absolute(absolute_path)
 
 
-static func _format_png_count(count: int) -> String:
-	return "Exported %d PNG %s." % [count, "file" if count == 1 else "files"]
+static func _is_supported_output_extension(extension: String) -> bool:
+	return not normalize_output_format(extension).is_empty()
+
+
+static func format_export_file_count(count: int, output_format: Variant) -> String:
+	return "%d %s %s" % [count, get_output_format_label(output_format), "file" if count == 1 else "files"]
+
+
+static func _save_image(image: Image, output_path: String, output_format: String) -> Error:
+	match output_format:
+		"png":
+			return image.save_png(output_path)
+		"webp":
+			return image.save_webp(output_path)
+		"jpg":
+			var opaque_image := image.duplicate()
+			if opaque_image.get_format() != Image.FORMAT_RGB8:
+				opaque_image.convert(Image.FORMAT_RGB8)
+			return opaque_image.save_jpg(output_path)
+
+	return ERR_INVALID_PARAMETER
 
 
 static func _failure(message: String) -> Dictionary:
