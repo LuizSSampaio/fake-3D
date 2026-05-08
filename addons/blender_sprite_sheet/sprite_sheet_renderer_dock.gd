@@ -14,6 +14,7 @@ const ProfileStore := preload("res://addons/blender_sprite_sheet/sprite_sheet_pr
 const SourceSelection := preload("res://addons/blender_sprite_sheet/sprite_sheet_source_selection.gd")
 const ExportPlan := preload("res://addons/blender_sprite_sheet/sprite_sheet_export_plan.gd")
 const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
+const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
 
 const SUPPORTED_EXTENSIONS := SourceLoader.SUPPORTED_EXTENSIONS
 const DEFAULT_CAMERA_POSITION := Vector3(0.0, 1.5, 4.0)
@@ -64,6 +65,12 @@ var _frame_height_spin: SpinBox
 var _frame_count_spin: SpinBox
 var _columns_spin: SpinBox
 var _frame_spacing_spin: SpinBox
+var _msaa_option: OptionButton
+var _screen_space_aa_option: OptionButton
+var _taa_check: CheckBox
+var _supersample_option: OptionButton
+var _resize_filter_option: OptionButton
+var _anisotropic_filtering_option: OptionButton
 var _output_path_edit: LineEdit
 var _export_individual_frames_check: CheckBox
 var _export_button: Button
@@ -78,6 +85,7 @@ func _ready() -> void:
 	name = "Fake3D"
 	custom_minimum_size = Vector2(360, 520)
 	_build_ui()
+	_update_render_options()
 	_build_preview_scene()
 	_sync_camera_from_controls()
 	_update_background()
@@ -377,6 +385,32 @@ func _create_export_controls() -> Control:
 
 	_frame_spacing_spin = ControlFactory.create_spin_box(0.0, 1024.0, 1.0, 0.0)
 	ControlFactory.add_labeled_control(container, "Spacing", _frame_spacing_spin)
+
+	_msaa_option = ControlFactory.create_option_button(RenderOptions.get_msaa_options(), RenderOptions.DEFAULT_MSAA_3D)
+	ControlFactory.add_labeled_control(container, "MSAA", _msaa_option)
+	_msaa_option.item_selected.connect(_on_render_option_selected)
+
+	_screen_space_aa_option = ControlFactory.create_option_button(RenderOptions.get_screen_space_aa_options(), RenderOptions.DEFAULT_SCREEN_SPACE_AA)
+	ControlFactory.add_labeled_control(container, "Edge AA", _screen_space_aa_option)
+	_screen_space_aa_option.item_selected.connect(_on_render_option_selected)
+
+	_taa_check = CheckBox.new()
+	_taa_check.text = "Temporal anti-aliasing"
+	_taa_check.button_pressed = RenderOptions.DEFAULT_USE_TAA
+	_taa_check.toggled.connect(_on_taa_toggled)
+	container.add_child(_taa_check)
+
+	_supersample_option = ControlFactory.create_option_button(RenderOptions.get_supersample_options(), RenderOptions.DEFAULT_SUPERSAMPLE_SCALE)
+	ControlFactory.add_labeled_control(container, "Supersample", _supersample_option)
+	_supersample_option.item_selected.connect(_on_render_option_selected)
+
+	_resize_filter_option = ControlFactory.create_option_button(RenderOptions.get_resize_filter_options(), RenderOptions.DEFAULT_RESIZE_FILTER)
+	ControlFactory.add_labeled_control(container, "Resize Filter", _resize_filter_option)
+	_resize_filter_option.item_selected.connect(_on_render_option_selected)
+
+	_anisotropic_filtering_option = ControlFactory.create_option_button(RenderOptions.get_anisotropic_filtering_options(), RenderOptions.DEFAULT_ANISOTROPIC_FILTERING)
+	ControlFactory.add_labeled_control(container, "Texture Filter", _anisotropic_filtering_option)
+	_anisotropic_filtering_option.item_selected.connect(_on_render_option_selected)
 
 	var output_row := HBoxContainer.new()
 	output_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -938,6 +972,12 @@ func _collect_profile_settings() -> Dictionary:
 			"frame_count": int(round(_frame_count_spin.value)),
 			"columns": int(round(_columns_spin.value)),
 			"frame_spacing": int(round(_frame_spacing_spin.value)),
+			"msaa_3d": _get_option_id(_msaa_option, RenderOptions.DEFAULT_MSAA_3D),
+			"screen_space_aa": _get_option_id(_screen_space_aa_option, RenderOptions.DEFAULT_SCREEN_SPACE_AA),
+			"use_taa": _taa_check.button_pressed,
+			"supersample_scale": _get_option_id(_supersample_option, RenderOptions.DEFAULT_SUPERSAMPLE_SCALE),
+			"resize_filter": _get_option_id(_resize_filter_option, RenderOptions.DEFAULT_RESIZE_FILTER),
+			"anisotropic_filtering": _get_option_id(_anisotropic_filtering_option, RenderOptions.DEFAULT_ANISOTROPIC_FILTERING),
 			"export_individual_frames": _export_individual_frames_check.button_pressed,
 			"name_pattern": _name_pattern_edit.text.strip_edges(),
 		},
@@ -979,6 +1019,13 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		_frame_count_spin.set_value_no_signal(float(export_settings.get("frame_count", _frame_count_spin.value)))
 		_columns_spin.set_value_no_signal(float(export_settings.get("columns", _columns_spin.value)))
 		_frame_spacing_spin.set_value_no_signal(float(export_settings.get("frame_spacing", _frame_spacing_spin.value)))
+		var render_settings := RenderOptions.normalize(export_settings)
+		ControlFactory.select_option_by_id(_msaa_option, int(render_settings["msaa_3d"]))
+		ControlFactory.select_option_by_id(_screen_space_aa_option, int(render_settings["screen_space_aa"]))
+		_taa_check.button_pressed = bool(render_settings["use_taa"])
+		ControlFactory.select_option_by_id(_supersample_option, int(render_settings["supersample_scale"]))
+		ControlFactory.select_option_by_id(_resize_filter_option, int(render_settings["resize_filter"]))
+		ControlFactory.select_option_by_id(_anisotropic_filtering_option, int(render_settings["anisotropic_filtering"]))
 		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
 		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
 		if _name_pattern_edit.text.is_empty():
@@ -987,6 +1034,7 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 	_sync_object_from_controls()
 	_sync_camera_from_controls()
 	_update_background()
+	_update_render_options()
 	_update_export_frame_overlay()
 	_apply_material_settings(false)
 
@@ -1060,6 +1108,14 @@ func _on_export_dimensions_changed(_value: float) -> void:
 	_update_export_frame_overlay()
 
 
+func _on_render_option_selected(_index: int) -> void:
+	_update_render_options()
+
+
+func _on_taa_toggled(_button_pressed: bool) -> void:
+	_update_render_options()
+
+
 func _update_background() -> void:
 	var transparent := _transparent_background_check.button_pressed
 	_viewport.transparent_bg = transparent
@@ -1087,6 +1143,12 @@ func _collect_export_settings() -> Dictionary:
 		"frame_count": int(round(_frame_count_spin.value)),
 		"columns": int(round(_columns_spin.value)),
 		"frame_spacing": int(round(_frame_spacing_spin.value)),
+		"msaa_3d": _get_option_id(_msaa_option, RenderOptions.DEFAULT_MSAA_3D),
+		"screen_space_aa": _get_option_id(_screen_space_aa_option, RenderOptions.DEFAULT_SCREEN_SPACE_AA),
+		"use_taa": _taa_check.button_pressed,
+		"supersample_scale": _get_option_id(_supersample_option, RenderOptions.DEFAULT_SUPERSAMPLE_SCALE),
+		"resize_filter": _get_option_id(_resize_filter_option, RenderOptions.DEFAULT_RESIZE_FILTER),
+		"anisotropic_filtering": _get_option_id(_anisotropic_filtering_option, RenderOptions.DEFAULT_ANISOTROPIC_FILTERING),
 		"transparent_background": _transparent_background_check.button_pressed,
 		"background_color": _background_color_picker.color,
 		"output_path": _output_path_edit.text.strip_edges(),
@@ -1094,6 +1156,28 @@ func _collect_export_settings() -> Dictionary:
 		"export_individual_frames": _export_individual_frames_check.button_pressed,
 		"name_pattern": _name_pattern_edit.text.strip_edges(),
 	}
+
+
+func _update_render_options() -> void:
+	if _viewport == null:
+		return
+
+	RenderOptions.apply_to_viewport(_viewport, _collect_render_settings())
+
+
+func _collect_render_settings() -> Dictionary:
+	return {
+		"msaa_3d": _get_option_id(_msaa_option, RenderOptions.DEFAULT_MSAA_3D),
+		"screen_space_aa": _get_option_id(_screen_space_aa_option, RenderOptions.DEFAULT_SCREEN_SPACE_AA),
+		"use_taa": _taa_check.button_pressed if _taa_check != null else RenderOptions.DEFAULT_USE_TAA,
+		"supersample_scale": _get_option_id(_supersample_option, RenderOptions.DEFAULT_SUPERSAMPLE_SCALE),
+		"resize_filter": _get_option_id(_resize_filter_option, RenderOptions.DEFAULT_RESIZE_FILTER),
+		"anisotropic_filtering": _get_option_id(_anisotropic_filtering_option, RenderOptions.DEFAULT_ANISOTROPIC_FILTERING),
+	}
+
+
+func _get_option_id(option_button: OptionButton, fallback: int) -> int:
+	return ControlFactory.get_selected_option_id(option_button, fallback)
 
 
 func _normalize_profile_path(path: String) -> String:
@@ -1177,9 +1261,10 @@ func _export_sprite_sheets() -> void:
 		settings = loaded_validation.settings
 		_sync_camera_from_controls()
 		_update_background()
+		_update_render_options()
 
 		var frame_size := Vector2i(int(settings["frame_width"]), int(settings["frame_height"]))
-		var capture_result: Dictionary = await Capture.capture_scene(_scene_root, frame_size, bool(settings["transparent_background"]))
+		var capture_result: Dictionary = await Capture.capture_scene(_scene_root, frame_size, bool(settings["transparent_background"]), settings)
 		if not capture_result.ok:
 			_finish_export("Export failed for %s: %s" % [source_name, capture_result.message], true)
 			return
@@ -1202,7 +1287,13 @@ func _write_static_export(captured_frame: Image, settings: Dictionary) -> Dictio
 			"message": "Preview viewport capture produced an empty image.",
 		}
 
-	var frames := Exporter.build_repeated_frames(captured_frame, int(settings["frame_count"]), int(settings["frame_width"]), int(settings["frame_height"]))
+	var frames := Exporter.build_repeated_frames(
+		captured_frame,
+		int(settings["frame_count"]),
+		int(settings["frame_width"]),
+		int(settings["frame_height"]),
+		RenderOptions.get_resize_filter(settings)
+	)
 	return Exporter.export_pngs(frames, settings)
 
 

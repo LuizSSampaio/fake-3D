@@ -30,6 +30,35 @@ static func create_spin_box(min_value: float, max_value: float, step: float, val
 	return spin
 
 
+static func create_option_button(options: Array[Dictionary], selected_id: int) -> OptionButton:
+	var option_button := OptionButton.new()
+	for option in options:
+		option_button.add_item(str(option["label"]), int(option["value"]))
+
+	select_option_by_id(option_button, selected_id)
+	return option_button
+
+
+static func select_option_by_id(option_button: OptionButton, item_id: int) -> void:
+	if option_button == null:
+		return
+
+	for index in range(option_button.item_count):
+		if option_button.get_item_id(index) == item_id:
+			option_button.select(index)
+			return
+
+	if option_button.item_count > 0:
+		option_button.select(0)
+
+
+static func get_selected_option_id(option_button: OptionButton, fallback: int) -> int:
+	if option_button == null or option_button.selected < 0:
+		return fallback
+
+	return option_button.get_item_id(option_button.selected)
+
+
 static func create_vector3_row(
 	parent: BoxContainer,
 	label_text: String,

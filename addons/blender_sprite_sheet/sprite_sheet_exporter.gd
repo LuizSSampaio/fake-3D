@@ -1,6 +1,8 @@
 @tool
 extends RefCounted
 
+const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
+
 const DEFAULT_FRAME_DIGITS := 3
 const DEFAULT_OUTPUT_NAME_PATTERN := "{model}.png"
 
@@ -45,6 +47,11 @@ static func validate_export_settings(settings: Dictionary, has_loaded_source: bo
 	normalized_settings["frame_count"] = frame_count
 	normalized_settings["columns"] = columns
 	normalized_settings["frame_spacing"] = frame_spacing
+	normalized_settings = RenderOptions.normalize(normalized_settings)
+
+	var capture_validation := RenderOptions.validate_capture_size(Vector2i(frame_width, frame_height), normalized_settings)
+	if not capture_validation.ok:
+		return capture_validation
 
 	return {
 		"ok": true,
@@ -112,14 +119,14 @@ static func calculate_layout(frame_count: int, columns: int, frame_width: int, f
 	}
 
 
-static func build_repeated_frames(frame: Image, frame_count: int, frame_width: int, frame_height: int) -> Array[Image]:
+static func build_repeated_frames(frame: Image, frame_count: int, frame_width: int, frame_height: int, resize_filter := Image.INTERPOLATE_LANCZOS) -> Array[Image]:
 	var frames: Array[Image] = []
 	for _index in range(frame_count):
-		frames.append(_copy_frame_at_size(frame, frame_width, frame_height))
+		frames.append(_copy_frame_at_size(frame, frame_width, frame_height, resize_filter))
 	return frames
 
 
-static func assemble_sprite_sheet(frames: Array[Image], frame_width: int, frame_height: int, columns: int, frame_spacing: int) -> Image:
+static func assemble_sprite_sheet(frames: Array[Image], frame_width: int, frame_height: int, columns: int, frame_spacing: int, resize_filter := Image.INTERPOLATE_LANCZOS) -> Image:
 	var layout := calculate_layout(frames.size(), columns, frame_width, frame_height, frame_spacing)
 	var sheet_size: Vector2i = layout["sheet_size"]
 	var sheet := Image.create(sheet_size.x, sheet_size.y, false, Image.FORMAT_RGBA8)
@@ -132,7 +139,7 @@ static func assemble_sprite_sheet(frames: Array[Image], frame_width: int, frame_
 			column * (frame_width + max(frame_spacing, 0)),
 			row * (frame_height + max(frame_spacing, 0))
 		)
-		var frame := _copy_frame_at_size(frames[frame_index], frame_width, frame_height)
+		var frame := _copy_frame_at_size(frames[frame_index], frame_width, frame_height, resize_filter)
 		sheet.blit_rect(frame, Rect2i(Vector2i.ZERO, Vector2i(frame_width, frame_height)), destination)
 
 	return sheet
@@ -146,9 +153,10 @@ static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionar
 	var frame_height := int(settings["frame_height"])
 	var columns := int(settings["columns"])
 	var frame_spacing := int(settings["frame_spacing"])
+	var resize_filter := RenderOptions.get_resize_filter(settings)
 	var output_path := normalize_png_output_path(str(settings["output_path"]))
 	var exported_paths: PackedStringArray = []
-	var sheet := assemble_sprite_sheet(frames, frame_width, frame_height, columns, frame_spacing)
+	var sheet := assemble_sprite_sheet(frames, frame_width, frame_height, columns, frame_spacing, resize_filter)
 	var sheet_error := sheet.save_png(output_path)
 	if sheet_error != OK:
 		return _failure("Image encoding failed for sprite sheet: %s" % error_string(sheet_error))
@@ -158,7 +166,7 @@ static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionar
 	if bool(settings.get("export_individual_frames", false)):
 		var frame_paths := get_individual_frame_paths(output_path, frames.size())
 		for index in range(frames.size()):
-			var frame := _copy_frame_at_size(frames[index], frame_width, frame_height)
+			var frame := _copy_frame_at_size(frames[index], frame_width, frame_height, resize_filter)
 			var frame_error := frame.save_png(frame_paths[index])
 			if frame_error != OK:
 				_delete_exported_paths(exported_paths)
@@ -183,13 +191,13 @@ static func get_individual_frame_paths(output_path: String, frame_count: int) ->
 	return paths
 
 
-static func _copy_frame_at_size(frame: Image, frame_width: int, frame_height: int) -> Image:
+static func _copy_frame_at_size(frame: Image, frame_width: int, frame_height: int, resize_filter := Image.INTERPOLATE_LANCZOS) -> Image:
 	var copy := frame.duplicate()
 	if copy.get_format() != Image.FORMAT_RGBA8:
 		copy.convert(Image.FORMAT_RGBA8)
 
 	if copy.get_width() != frame_width or copy.get_height() != frame_height:
-		copy.resize(frame_width, frame_height, Image.INTERPOLATE_LANCZOS)
+		copy.resize(frame_width, frame_height, resize_filter)
 
 	return copy
 

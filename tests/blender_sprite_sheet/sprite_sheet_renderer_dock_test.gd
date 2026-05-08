@@ -4,6 +4,7 @@ extends GdUnitTestSuite
 const SpriteSheetRendererDock := preload("res://addons/blender_sprite_sheet/sprite_sheet_renderer_dock.gd")
 const SpriteSheetExporter := preload("res://addons/blender_sprite_sheet/sprite_sheet_exporter.gd")
 const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_frame_overlay.gd")
+const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
 const VECTOR_EPSILON := Vector3(0.001, 0.001, 0.001)
 
 var _dock: VBoxContainer
@@ -28,6 +29,10 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_str(_dock._status_label.text).is_equal("Select a supported 3D asset to preview.")
 	assert_object(_dock._viewport).is_not_null()
 	assert_bool(_dock._viewport.transparent_bg).is_true()
+	assert_int(_dock._viewport.msaa_3d).is_equal(RenderOptions.DEFAULT_MSAA_3D)
+	assert_int(_dock._viewport.screen_space_aa).is_equal(RenderOptions.DEFAULT_SCREEN_SPACE_AA)
+	assert_bool(_dock._viewport.use_taa).is_false()
+	assert_int(_dock._viewport.anisotropic_filtering_level).is_equal(RenderOptions.DEFAULT_ANISOTROPIC_FILTERING)
 	assert_bool(_dock._preview_stack.clip_contents).is_true()
 	assert_bool(_dock._checkerboard.visible).is_true()
 	assert_object(_dock._export_frame_overlay).is_not_null()
@@ -109,6 +114,12 @@ func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> 
 	assert_int(int(_dock._frame_count_spin.value)).is_equal(1)
 	assert_int(int(_dock._columns_spin.value)).is_equal(1)
 	assert_int(int(_dock._frame_spacing_spin.value)).is_equal(0)
+	assert_int(_dock._get_option_id(_dock._msaa_option, -1)).is_equal(RenderOptions.DEFAULT_MSAA_3D)
+	assert_int(_dock._get_option_id(_dock._screen_space_aa_option, -1)).is_equal(RenderOptions.DEFAULT_SCREEN_SPACE_AA)
+	assert_bool(_dock._taa_check.button_pressed).is_false()
+	assert_int(_dock._get_option_id(_dock._supersample_option, -1)).is_equal(RenderOptions.DEFAULT_SUPERSAMPLE_SCALE)
+	assert_int(_dock._get_option_id(_dock._resize_filter_option, -1)).is_equal(RenderOptions.DEFAULT_RESIZE_FILTER)
+	assert_int(_dock._get_option_id(_dock._anisotropic_filtering_option, -1)).is_equal(RenderOptions.DEFAULT_ANISOTROPIC_FILTERING)
 	assert_str(_dock._export_result_label.text).is_equal("PNG export is ready after source models are loaded.")
 
 
@@ -204,6 +215,29 @@ func test_export_dimension_controls_update_preview_overlay() -> void:
 	_dock._on_export_dimensions_changed(0.0)
 
 	assert_vector(_dock._export_frame_overlay.frame_size).is_equal(Vector2i(512, 128))
+
+
+func test_render_quality_controls_update_preview_and_export_settings() -> void:
+	_select_option_by_id(_dock._msaa_option, Viewport.MSAA_8X)
+	_select_option_by_id(_dock._screen_space_aa_option, Viewport.SCREEN_SPACE_AA_FXAA)
+	_dock._taa_check.button_pressed = true
+	_select_option_by_id(_dock._supersample_option, 2)
+	_select_option_by_id(_dock._resize_filter_option, Image.INTERPOLATE_CUBIC)
+	_select_option_by_id(_dock._anisotropic_filtering_option, Viewport.ANISOTROPY_16X)
+
+	_dock._update_render_options()
+	var settings: Dictionary = _dock._collect_export_settings()
+
+	assert_int(_dock._viewport.msaa_3d).is_equal(Viewport.MSAA_8X)
+	assert_int(_dock._viewport.screen_space_aa).is_equal(Viewport.SCREEN_SPACE_AA_FXAA)
+	assert_bool(_dock._viewport.use_taa).is_true()
+	assert_int(_dock._viewport.anisotropic_filtering_level).is_equal(Viewport.ANISOTROPY_16X)
+	assert_int(settings.msaa_3d).is_equal(Viewport.MSAA_8X)
+	assert_int(settings.screen_space_aa).is_equal(Viewport.SCREEN_SPACE_AA_FXAA)
+	assert_bool(settings.use_taa).is_true()
+	assert_int(settings.supersample_scale).is_equal(2)
+	assert_int(settings.resize_filter).is_equal(Image.INTERPOLATE_CUBIC)
+	assert_int(settings.anisotropic_filtering).is_equal(Viewport.ANISOTROPY_16X)
 
 
 func test_apply_material_settings_sets_and_clears_surface_overrides() -> void:
@@ -316,6 +350,12 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	_dock._frame_count_spin.set_value_no_signal(8.0)
 	_dock._columns_spin.set_value_no_signal(4.0)
 	_dock._frame_spacing_spin.set_value_no_signal(2.0)
+	_select_option_by_id(_dock._msaa_option, Viewport.MSAA_8X)
+	_select_option_by_id(_dock._screen_space_aa_option, Viewport.SCREEN_SPACE_AA_FXAA)
+	_dock._taa_check.button_pressed = true
+	_select_option_by_id(_dock._supersample_option, 2)
+	_select_option_by_id(_dock._resize_filter_option, Image.INTERPOLATE_CUBIC)
+	_select_option_by_id(_dock._anisotropic_filtering_option, Viewport.ANISOTROPY_16X)
 	_dock._export_individual_frames_check.button_pressed = true
 	_dock._name_pattern_edit.text = "{index}_{model}.png"
 	var profile_base_path := _temp_resource_path("book_profile")
@@ -345,6 +385,12 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	assert_int(int(profile.export.frame_count)).is_equal(8)
 	assert_int(int(profile.export.columns)).is_equal(4)
 	assert_int(int(profile.export.frame_spacing)).is_equal(2)
+	assert_int(int(profile.export.msaa_3d)).is_equal(Viewport.MSAA_8X)
+	assert_int(int(profile.export.screen_space_aa)).is_equal(Viewport.SCREEN_SPACE_AA_FXAA)
+	assert_bool(bool(profile.export.use_taa)).is_true()
+	assert_int(int(profile.export.supersample_scale)).is_equal(2)
+	assert_int(int(profile.export.resize_filter)).is_equal(Image.INTERPOLATE_CUBIC)
+	assert_int(int(profile.export.anisotropic_filtering)).is_equal(Viewport.ANISOTROPY_16X)
 	assert_bool(bool(profile.export.export_individual_frames)).is_true()
 	assert_str(profile.export.name_pattern).is_equal("{index}_{model}.png")
 
@@ -374,6 +420,12 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 			"frame_count": 6,
 			"columns": 3,
 			"frame_spacing": 4,
+			"msaa_3d": Viewport.MSAA_8X,
+			"screen_space_aa": Viewport.SCREEN_SPACE_AA_FXAA,
+			"use_taa": true,
+			"supersample_scale": 2,
+			"resize_filter": Image.INTERPOLATE_CUBIC,
+			"anisotropic_filtering": Viewport.ANISOTROPY_16X,
 			"export_individual_frames": true,
 			"name_pattern": "{model}_{index}.png",
 		},
@@ -396,6 +448,16 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	assert_int(int(_dock._frame_count_spin.value)).is_equal(6)
 	assert_int(int(_dock._columns_spin.value)).is_equal(3)
 	assert_int(int(_dock._frame_spacing_spin.value)).is_equal(4)
+	assert_int(_dock._get_option_id(_dock._msaa_option, -1)).is_equal(Viewport.MSAA_8X)
+	assert_int(_dock._get_option_id(_dock._screen_space_aa_option, -1)).is_equal(Viewport.SCREEN_SPACE_AA_FXAA)
+	assert_bool(_dock._taa_check.button_pressed).is_true()
+	assert_int(_dock._get_option_id(_dock._supersample_option, -1)).is_equal(2)
+	assert_int(_dock._get_option_id(_dock._resize_filter_option, -1)).is_equal(Image.INTERPOLATE_CUBIC)
+	assert_int(_dock._get_option_id(_dock._anisotropic_filtering_option, -1)).is_equal(Viewport.ANISOTROPY_16X)
+	assert_int(_dock._viewport.msaa_3d).is_equal(Viewport.MSAA_8X)
+	assert_int(_dock._viewport.screen_space_aa).is_equal(Viewport.SCREEN_SPACE_AA_FXAA)
+	assert_bool(_dock._viewport.use_taa).is_true()
+	assert_int(_dock._viewport.anisotropic_filtering_level).is_equal(Viewport.ANISOTROPY_16X)
 	assert_bool(_dock._export_individual_frames_check.button_pressed).is_true()
 	assert_str(_dock._name_pattern_edit.text).is_equal("{model}_{index}.png")
 
@@ -643,6 +705,16 @@ func _set_vector3_spin_values(controls: Array[SpinBox], value: Vector3) -> void:
 	controls[0].set_value_no_signal(value.x)
 	controls[1].set_value_no_signal(value.y)
 	controls[2].set_value_no_signal(value.z)
+
+
+func _select_option_by_id(option_button: OptionButton, item_id: int) -> void:
+	for index in range(option_button.item_count):
+		if option_button.get_item_id(index) == item_id:
+			option_button.select(index)
+			return
+
+	if option_button.item_count > 0:
+		option_button.select(0)
 
 
 func _save_test_scene(file_name: String) -> String:
