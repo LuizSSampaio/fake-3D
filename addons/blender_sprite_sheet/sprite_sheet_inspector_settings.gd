@@ -4,6 +4,8 @@ extends Resource
 const DEFAULT_OBJECT_POSITION := Vector3.ZERO
 const DEFAULT_OBJECT_ROTATION := Vector3.ZERO
 const DEFAULT_BACKGROUND_COLOR := Color(0.12, 0.12, 0.12, 1.0)
+const PROJECTION_PERSPECTIVE := 0
+const PROJECTION_ORTHOGRAPHIC := 1
 
 @export_group("Object")
 @export var object_position := DEFAULT_OBJECT_POSITION
@@ -11,8 +13,7 @@ const DEFAULT_BACKGROUND_COLOR := Color(0.12, 0.12, 0.12, 1.0)
 
 @export_group("Camera")
 @export_enum("Perspective", "Orthographic")
-# 0 = perspective, 1 = orthographic
-var camera_projection: int = 0
+var camera_projection: int = PROJECTION_PERSPECTIVE
 @export_range(1.0, 179.0, 0.1, "or_less,or_greater")
 var camera_fov: float = 70.0
 @export_range(0.001, 1000.0, 0.01, "or_less,or_greater")
@@ -32,18 +33,18 @@ func apply_to_controls(
 	transparent_background_check: CheckBox,
 	background_color_picker: ColorPickerButton
 ) -> void:
-	if object_position_controls.size() >= 3:
+	if object_position_controls.size() == 3:
 		object_position_controls[0].set_value_no_signal(object_position.x)
 		object_position_controls[1].set_value_no_signal(object_position.y)
 		object_position_controls[2].set_value_no_signal(object_position.z)
 
-	if object_rotation_controls.size() >= 3:
+	if object_rotation_controls.size() == 3:
 		object_rotation_controls[0].set_value_no_signal(object_rotation.x)
 		object_rotation_controls[1].set_value_no_signal(object_rotation.y)
 		object_rotation_controls[2].set_value_no_signal(object_rotation.z)
 
 	if camera_projection_option != null:
-		var projection_id := Camera3D.PROJECTION_ORTHOGONAL if camera_projection == 1 else Camera3D.PROJECTION_PERSPECTIVE
+		var projection_id := Camera3D.PROJECTION_ORTHOGONAL if camera_projection == PROJECTION_ORTHOGRAPHIC else Camera3D.PROJECTION_PERSPECTIVE
 		for index in range(camera_projection_option.item_count):
 			if camera_projection_option.get_item_id(index) == projection_id:
 				camera_projection_option.select(index)
@@ -71,14 +72,14 @@ func sync_from_controls(
 	transparent_background_check: CheckBox,
 	background_color_picker: ColorPickerButton
 ) -> void:
-	if object_position_controls.size() >= 3:
+	if object_position_controls.size() == 3:
 		object_position = Vector3(
 			object_position_controls[0].value,
 			object_position_controls[1].value,
 			object_position_controls[2].value
 		)
 
-	if object_rotation_controls.size() >= 3:
+	if object_rotation_controls.size() == 3:
 		object_rotation = Vector3(
 			object_rotation_controls[0].value,
 			object_rotation_controls[1].value,
@@ -87,7 +88,7 @@ func sync_from_controls(
 
 	if camera_projection_option != null and camera_projection_option.selected >= 0:
 		var projection_id := camera_projection_option.get_item_id(camera_projection_option.selected)
-		camera_projection = 1 if projection_id == Camera3D.PROJECTION_ORTHOGONAL else 0
+		camera_projection = PROJECTION_ORTHOGRAPHIC if projection_id == Camera3D.PROJECTION_ORTHOGONAL else PROJECTION_PERSPECTIVE
 
 	if camera_fov_spin != null:
 		camera_fov = camera_fov_spin.value

@@ -128,7 +128,7 @@ func _build_ui() -> void:
 	_inspector_sync_controls.visible = false
 	_inspector_sync_controls.add_child(_create_object_controls())
 	_inspector_sync_controls.add_child(_create_background_controls())
-	add_child(_inspector_sync_controls)
+	content.add_child(_inspector_sync_controls)
 
 	content.add_child(ControlFactory.create_section_label("Properties"))
 	content.add_child(_create_properties_controls())
