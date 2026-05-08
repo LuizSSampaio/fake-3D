@@ -43,6 +43,7 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_bool(_dock._source_reload_button.disabled).is_true()
 	assert_bool(_dock._source_remove_button.disabled).is_true()
 	assert_bool(_dock._source_clear_button.disabled).is_true()
+	assert_str(_dock._output_path_edit.placeholder_text).is_equal("res://exports")
 	assert_str(_dock._name_pattern_edit.text).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_NAME_PATTERN)
 	assert_bool(_dock._background_color_picker.disabled).is_true()
 	assert_object(_dock._object_root).is_not_null()
@@ -335,7 +336,7 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	var object_rotation := Vector3(10.0, 35.0, -15.0)
 	var background_color := Color(0.25, 0.5, 0.75, 1.0)
 	_dock._source_path_edit.text = "res://models/book.glb"
-	_dock._output_path_edit.text = "res://exports/book.png"
+	_dock._output_path_edit.text = "res://exports"
 	_dock._material_path_edit.text = "res://materials/book.tres"
 	_dock._texture_path_edit.text = "res://textures/book.png"
 	_set_vector3_spin_values(_dock._object_position_controls, object_position)
@@ -530,7 +531,8 @@ func test_frame_model_resets_object_and_updates_framing_size() -> void:
 
 
 func test_export_validation_reports_missing_source_and_invalid_output_settings() -> void:
-	_dock._output_path_edit.text = _temp_resource_path("missing_source.png")
+	var output_directory := _temp_resource_directory()
+	_dock._output_path_edit.text = output_directory
 
 	var validation: Dictionary = _dock._validate_export_settings()
 
@@ -542,13 +544,25 @@ func test_export_validation_reports_missing_source_and_invalid_output_settings()
 	validation = _dock._validate_export_settings()
 
 	assert_bool(validation.ok).is_false()
-	assert_str(validation.message).is_equal("Choose an output PNG path before exporting.")
+	assert_str(validation.message).is_equal("Choose an output folder before exporting.")
 
-	_dock._output_path_edit.text = _temp_resource_path("export_validation.txt")
+	_dock._output_path_edit.text = output_directory.path_join("missing_folder")
 	validation = _dock._validate_export_settings()
 
 	assert_bool(validation.ok).is_false()
-	assert_str(validation.message).is_equal("Output format must be PNG for static sprite export.")
+	assert_str(validation.message).contains("Export folder does not exist:")
+
+
+func test_output_folder_entry_accepts_directory_and_strips_legacy_file_names() -> void:
+	var output_directory := _temp_resource_directory()
+
+	_dock._on_output_path_submitted(output_directory)
+
+	assert_str(_dock._output_path_edit.text).is_equal(output_directory)
+
+	_dock._on_output_path_submitted(output_directory.path_join("legacy_name.png"))
+
+	assert_str(_dock._output_path_edit.text).is_equal(output_directory)
 
 
 func test_exporter_layout_accounts_for_columns_rows_and_spacing() -> void:
@@ -560,14 +574,14 @@ func test_exporter_layout_accounts_for_columns_rows_and_spacing() -> void:
 
 
 func test_exporter_formats_source_output_paths_from_pattern() -> void:
-	var output_path := "res://exports/base_sheet.png"
+	var output_path := "res://exports"
 	var source_path := "res://models/Book Scene.glb"
 
 	var formatted_name := SpriteSheetExporter.format_output_name("{output}_{index}_{model}.png", source_path, 1, 12, output_path)
 	var source_output_path := SpriteSheetExporter.get_source_output_path(output_path, source_path, "{output}_{index}_{model}", 1, 12)
 
-	assert_str(formatted_name).is_equal("base_sheet_002_Book Scene.png")
-	assert_str(source_output_path).is_equal("res://exports/base_sheet_002_Book Scene.png")
+	assert_str(formatted_name).is_equal("exports_002_Book Scene.png")
+	assert_str(source_output_path).is_equal("res://exports/exports_002_Book Scene.png")
 
 
 func test_export_validation_builds_source_output_paths_from_pattern() -> void:
@@ -577,7 +591,7 @@ func test_export_validation_builds_source_output_paths_from_pattern() -> void:
 	paths.append(first_path)
 	paths.append(second_path)
 	_dock._set_source_paths(paths, false)
-	_dock._output_path_edit.text = _temp_resource_path("source_base.png")
+	_dock._output_path_edit.text = _temp_resource_directory()
 	_dock._name_pattern_edit.text = "{index}_{model}"
 
 	var validation: Dictionary = _dock._validate_export_settings()
@@ -598,7 +612,7 @@ func test_export_validation_rejects_duplicate_generated_names() -> void:
 	paths.append(first_path)
 	paths.append(second_path)
 	_dock._set_source_paths(paths, false)
-	_dock._output_path_edit.text = _temp_resource_path("source_base.png")
+	_dock._output_path_edit.text = _temp_resource_directory()
 	_dock._name_pattern_edit.text = "same_name.png"
 
 	var validation: Dictionary = _dock._validate_export_settings()
@@ -663,8 +677,8 @@ func test_dock_single_source_export_writes_sheet_and_repeated_individual_frames_
 	_dock._columns_spin.set_value_no_signal(2.0)
 	_dock._frame_spacing_spin.set_value_no_signal(2.0)
 	_dock._export_individual_frames_check.button_pressed = true
-	var output_path := _temp_resource_path("dock_static_export.png")
-	_dock._output_path_edit.text = output_path
+	var output_directory := _temp_resource_directory()
+	_dock._output_path_edit.text = output_directory
 
 	var validation: Dictionary = _dock._validate_export_settings()
 	assert_bool(validation.ok).is_true()
@@ -748,8 +762,12 @@ func _save_test_scene(file_name: String) -> String:
 	return scene_path
 
 
+func _temp_resource_directory() -> String:
+	return create_temp_dir("blender_sprite_sheet")
+
+
 func _temp_resource_path(file_name: String) -> String:
-	return create_temp_dir("blender_sprite_sheet").path_join(file_name)
+	return _temp_resource_directory().path_join(file_name)
 
 
 func _write_json_file(path: String, data: Dictionary) -> void:

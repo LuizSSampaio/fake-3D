@@ -13,7 +13,7 @@ static func build(base_settings: Dictionary, source_paths: PackedStringArray, na
 	if clean_pattern.is_empty():
 		return _failure("Choose a file naming pattern before exporting.")
 
-	var base_validation := Exporter.validate_export_settings(base_settings, true)
+	var base_validation := Exporter.validate_export_directory_settings(base_settings, true)
 	if not base_validation.ok:
 		return base_validation
 
@@ -57,7 +57,7 @@ static func _settings_for_source(base_settings: Dictionary, source_path: String,
 	var item_settings := base_settings.duplicate()
 	item_settings["source_path"] = source_path
 	item_settings["output_path"] = Exporter.get_source_output_path(
-		str(base_settings["output_path"]),
+		str(base_settings["output_directory"]),
 		source_path,
 		name_pattern,
 		index,

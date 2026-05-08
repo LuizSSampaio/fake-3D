@@ -414,10 +414,11 @@ func _create_export_controls() -> Control:
 
 	var output_row := HBoxContainer.new()
 	output_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	output_row.add_child(ControlFactory.create_row_label("Output"))
+	output_row.add_child(ControlFactory.create_row_label("Folder"))
 
 	_output_path_edit = LineEdit.new()
-	_output_path_edit.placeholder_text = "res://sprite_sheet.png"
+	_output_path_edit.placeholder_text = "res://exports"
+	_output_path_edit.tooltip_text = "Folder where generated PNG files will be written."
 	_output_path_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_output_path_edit.text_submitted.connect(_on_output_path_submitted)
 	output_row.add_child(_output_path_edit)
@@ -431,7 +432,7 @@ func _create_export_controls() -> Control:
 	_name_pattern_edit = LineEdit.new()
 	_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
 	_name_pattern_edit.placeholder_text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
-	_name_pattern_edit.tooltip_text = "Tokens: {model}, {source}, {index}, {index0}, {count}, {output}"
+	_name_pattern_edit.tooltip_text = "Tokens: {model}, {source}, {index}, {index0}, {count}, {output} (folder name)"
 	ControlFactory.add_labeled_control(container, "Name Pattern", _name_pattern_edit)
 
 	_export_individual_frames_check = CheckBox.new()
@@ -486,11 +487,10 @@ func _create_file_dialogs() -> void:
 	add_child(_texture_file_dialog)
 
 	_output_file_dialog = EditorFileDialog.new()
-	_output_file_dialog.file_mode = EditorFileDialog.FILE_MODE_SAVE_FILE
+	_output_file_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
 	_output_file_dialog.access = EditorFileDialog.ACCESS_RESOURCES
-	_output_file_dialog.title = "Export Sprite Sheet PNG"
-	_output_file_dialog.add_filter("*.png ; PNG sprite sheet")
-	_output_file_dialog.file_selected.connect(_on_output_file_selected)
+	_output_file_dialog.title = "Select Export Folder"
+	_output_file_dialog.dir_selected.connect(_on_output_directory_selected)
 	add_child(_output_file_dialog)
 
 
@@ -539,7 +539,9 @@ func _on_texture_browse_pressed() -> void:
 
 func _on_output_browse_pressed() -> void:
 	if _output_file_dialog:
-		_output_file_dialog.current_path = _output_path_edit.text
+		var output_directory := Exporter.normalize_output_directory(_output_path_edit.text)
+		if not output_directory.is_empty():
+			_output_file_dialog.current_dir = output_directory
 		_output_file_dialog.popup_centered_ratio(0.75)
 
 
@@ -563,8 +565,8 @@ func _on_texture_file_selected(path: String) -> void:
 	_apply_material_settings()
 
 
-func _on_output_file_selected(path: String) -> void:
-	_output_path_edit.text = Exporter.normalize_png_output_path(path)
+func _on_output_directory_selected(path: String) -> void:
+	_output_path_edit.text = Exporter.normalize_output_directory(path)
 
 
 func _on_source_path_submitted(path: String) -> void:
@@ -586,7 +588,7 @@ func _on_texture_path_submitted(path: String) -> void:
 
 
 func _on_output_path_submitted(path: String) -> void:
-	_output_path_edit.text = Exporter.normalize_png_output_path(path)
+	_output_path_edit.text = Exporter.normalize_output_directory(path)
 
 
 func _on_source_list_item_selected(index: int) -> void:
@@ -1151,7 +1153,7 @@ func _collect_export_settings() -> Dictionary:
 		"anisotropic_filtering": _get_option_id(_anisotropic_filtering_option, RenderOptions.DEFAULT_ANISOTROPIC_FILTERING),
 		"transparent_background": _transparent_background_check.button_pressed,
 		"background_color": _background_color_picker.color,
-		"output_path": _output_path_edit.text.strip_edges(),
+		"output_directory": _output_path_edit.text.strip_edges(),
 		"output_format": "png",
 		"export_individual_frames": _export_individual_frames_check.button_pressed,
 		"name_pattern": _name_pattern_edit.text.strip_edges(),

@@ -8,6 +8,53 @@ const DEFAULT_OUTPUT_NAME_PATTERN := "{model}.png"
 
 
 static func validate_export_settings(settings: Dictionary, has_loaded_source: bool) -> Dictionary:
+	var base_validation := _validate_common_settings(settings, has_loaded_source)
+	if not base_validation.ok:
+		return base_validation
+
+	var normalized_settings: Dictionary = base_validation.settings
+	var output_path := normalize_png_output_path(str(settings.get("output_path", "")))
+
+	if output_path.is_empty():
+		return _failure("Choose an output PNG path before exporting.")
+
+	if output_path.get_extension().to_lower() != "png":
+		return _failure("Output format must be PNG for static sprite export.")
+
+	var base_dir := output_path.get_base_dir()
+	if base_dir.is_empty() or not _directory_exists(base_dir):
+		return _failure("Export directory does not exist: %s" % base_dir)
+
+	normalized_settings["output_path"] = output_path
+	return {
+		"ok": true,
+		"settings": normalized_settings,
+	}
+
+
+static func validate_export_directory_settings(settings: Dictionary, has_loaded_source: bool) -> Dictionary:
+	var base_validation := _validate_common_settings(settings, has_loaded_source)
+	if not base_validation.ok:
+		return base_validation
+
+	var normalized_settings: Dictionary = base_validation.settings
+	var output_directory := normalize_output_directory(str(settings.get("output_directory", settings.get("output_path", ""))))
+
+	if output_directory.is_empty():
+		return _failure("Choose an output folder before exporting.")
+
+	if not _directory_exists(output_directory):
+		return _failure("Export folder does not exist: %s" % output_directory)
+
+	normalized_settings["output_directory"] = output_directory
+	normalized_settings.erase("output_path")
+	return {
+		"ok": true,
+		"settings": normalized_settings,
+	}
+
+
+static func _validate_common_settings(settings: Dictionary, has_loaded_source: bool) -> Dictionary:
 	if not has_loaded_source:
 		return _failure("Load a source asset before exporting.")
 
@@ -16,7 +63,6 @@ static func validate_export_settings(settings: Dictionary, has_loaded_source: bo
 	var frame_count := int(settings.get("frame_count", 0))
 	var columns := int(settings.get("columns", 0))
 	var frame_spacing := int(settings.get("frame_spacing", 0))
-	var output_path := normalize_png_output_path(str(settings.get("output_path", "")))
 
 	if frame_width <= 0 or frame_height <= 0:
 		return _failure("Output frame width and height must be greater than zero.")
@@ -30,18 +76,7 @@ static func validate_export_settings(settings: Dictionary, has_loaded_source: bo
 	if frame_spacing < 0:
 		return _failure("Frame spacing cannot be negative.")
 
-	if output_path.is_empty():
-		return _failure("Choose an output PNG path before exporting.")
-
-	if output_path.get_extension().to_lower() != "png":
-		return _failure("Output format must be PNG for static sprite export.")
-
-	var base_dir := output_path.get_base_dir()
-	if base_dir.is_empty() or not _directory_exists(base_dir):
-		return _failure("Export directory does not exist: %s" % base_dir)
-
 	var normalized_settings := settings.duplicate()
-	normalized_settings["output_path"] = output_path
 	normalized_settings["frame_width"] = frame_width
 	normalized_settings["frame_height"] = frame_height
 	normalized_settings["frame_count"] = frame_count
@@ -70,13 +105,27 @@ static func normalize_png_output_path(path: String) -> String:
 	return clean_path
 
 
+static func normalize_output_directory(path: String) -> String:
+	var clean_path := _strip_trailing_slashes(path.strip_edges())
+	if clean_path.is_empty():
+		return ""
+
+	if _directory_exists(clean_path):
+		return clean_path
+
+	if not clean_path.get_extension().is_empty():
+		return clean_path.get_base_dir()
+
+	return clean_path
+
+
 static func format_output_name(pattern: String, source_path: String, index: int, count: int, output_path := "") -> String:
 	var clean_pattern := pattern.strip_edges()
 	if clean_pattern.is_empty():
 		clean_pattern = DEFAULT_OUTPUT_NAME_PATTERN
 
 	var source_name := source_path.get_file().get_basename()
-	var base_output_name := normalize_png_output_path(output_path).get_file().get_basename()
+	var base_output_name := _get_output_token_value(output_path)
 	if base_output_name.is_empty():
 		base_output_name = "sprite_sheet"
 
@@ -92,8 +141,8 @@ static func format_output_name(pattern: String, source_path: String, index: int,
 
 
 static func get_source_output_path(output_path: String, source_path: String, pattern: String, index: int, count: int) -> String:
-	var base_output_path := normalize_png_output_path(output_path)
-	var base_dir := base_output_path.get_base_dir()
+	var base_output_path := output_path.strip_edges()
+	var base_dir := normalize_output_directory(base_output_path)
 	var file_name := format_output_name(pattern, source_path, index, count, base_output_path).strip_edges()
 	if file_name.get_extension().is_empty():
 		file_name = "%s.png" % file_name
@@ -207,6 +256,28 @@ static func _directory_exists(path: String) -> bool:
 		return DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(path))
 
 	return DirAccess.dir_exists_absolute(path)
+
+
+static func _get_output_token_value(output_path: String) -> String:
+	var clean_path := _strip_trailing_slashes(output_path.strip_edges())
+	if clean_path.is_empty():
+		return ""
+
+	if _directory_exists(clean_path):
+		return clean_path.get_file()
+
+	if not clean_path.get_extension().is_empty():
+		return normalize_png_output_path(clean_path).get_file().get_basename()
+
+	return clean_path.get_file()
+
+
+static func _strip_trailing_slashes(path: String) -> String:
+	var clean_path := path
+	while clean_path.ends_with("/") and not clean_path.ends_with("://"):
+		clean_path = clean_path.trim_suffix("/")
+
+	return clean_path
 
 
 static func _delete_exported_paths(paths: PackedStringArray) -> void:
