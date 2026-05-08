@@ -16,6 +16,7 @@ const ExportPlan := preload("res://addons/blender_sprite_sheet/sprite_sheet_expo
 const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
 const AnimationUtils := preload("res://addons/blender_sprite_sheet/sprite_sheet_animation_utils.gd")
+const DockUI := preload("res://addons/blender_sprite_sheet/sprite_sheet_renderer_dock_ui.gd")
 
 const SUPPORTED_EXTENSIONS := SourceLoader.SUPPORTED_EXTENSIONS
 const DEFAULT_CAMERA_POSITION := Vector3(0.0, 1.5, 4.0)
@@ -127,33 +128,7 @@ func _exit_tree() -> void:
 
 
 func _build_ui() -> void:
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(scroll)
-
-	var content := VBoxContainer.new()
-	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content.add_theme_constant_override("separation", 8)
-	scroll.add_child(content)
-
-	var models_content := _create_source_controls() as VBoxContainer
-
-	_status_label = Label.new()
-	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status_label.text = "Select a supported 3D asset to preview."
-	models_content.add_child(_status_label)
-	_add_collapsible_section(content, "Models", models_content)
-
-	content.add_child(_create_preview_controls())
-
-	_add_collapsible_section(content, "Object", _create_object_controls())
-
-	_add_collapsible_section(content, "Settings", _create_settings_controls())
-
-	_add_collapsible_section(content, "Export", _create_export_controls())
-
-	_create_file_dialogs()
+	DockUI.build(self)
 
 
 func _add_collapsible_section(parent: BoxContainer, title: String, body: Control, collapsed := false, subsection := false) -> FoldableContainer:
