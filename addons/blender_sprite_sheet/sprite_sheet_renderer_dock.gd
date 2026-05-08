@@ -1113,6 +1113,7 @@ func _sync_inspector_settings_from_controls() -> void:
 		_transparent_background_check,
 		_background_color_picker
 	)
+	_inspector_settings.emit_changed()
 	_refresh_properties_inspector()
 
 
@@ -1138,8 +1139,8 @@ func _refresh_properties_inspector() -> void:
 	if _properties_inspector == null or _inspector_settings == null:
 		return
 
-	_properties_inspector.edit(null)
-	_properties_inspector.edit(_inspector_settings)
+	if _properties_inspector.get_edited_object() != _inspector_settings:
+		_properties_inspector.edit(_inspector_settings)
 
 
 func _on_properties_inspector_edited(_property: String) -> void:
