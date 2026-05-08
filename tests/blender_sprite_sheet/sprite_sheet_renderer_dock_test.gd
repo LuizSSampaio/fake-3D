@@ -613,6 +613,8 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	var object_rotation := Vector3(0.0, 180.0, 15.0)
 	var background_color := Color(0.1, 0.2, 0.3, 1.0)
 	var temp_dir := _temp_resource_directory()
+	var output_dir := temp_dir.path_join("exports")
+	assert_int(DirAccess.make_dir_recursive_absolute(output_dir)).is_equal(OK)
 	var models_dir := temp_dir.path_join("profile_load_models")
 	assert_int(DirAccess.make_dir_recursive_absolute(models_dir.path_join("nested"))).is_equal(OK)
 	var first_source_path := _save_test_scene_at_path(models_dir.path_join("hero.tscn"))
@@ -669,6 +671,7 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 			"anisotropic_filtering": Viewport.ANISOTROPY_16X,
 			"export_individual_frames": true,
 			"name_pattern": "{model}_{index}.png",
+			"output_directory": output_dir,
 		},
 	})
 
@@ -712,6 +715,7 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	assert_int(_dock._viewport.anisotropic_filtering_level).is_equal(Viewport.ANISOTROPY_16X)
 	assert_bool(_dock._export_individual_frames_check.button_pressed).is_true()
 	assert_str(_dock._name_pattern_edit.text).is_equal("{model}_{index}.png")
+	assert_str(_dock._output_path_edit.text).is_equal(output_dir)
 
 	_dock._load_source(_save_test_scene("profiled_model.tscn"))
 
@@ -731,6 +735,55 @@ func test_load_profile_reports_invalid_json() -> void:
 
 	assert_bool(result.ok).is_false()
 	assert_str(_dock._status_label.text).contains("Config JSON is invalid")
+
+
+func test_run_config_loads_profile_and_runs_export_validation() -> void:
+	var temp_dir := _temp_resource_directory()
+	var source_path := _save_test_scene_at_path(temp_dir.path_join("run_config_model.tscn"))
+	var profile_path := temp_dir.path_join("run_config_profile.json")
+	_write_json_file(profile_path, {
+		"format": SpriteSheetRendererDock.PROFILE_FORMAT,
+		"version": SpriteSheetRendererDock.PROFILE_VERSION,
+		"models": {
+			"items": [
+				{
+					"path": source_path,
+				},
+			],
+		},
+		"export": {
+			"frame_width": 16,
+			"frame_height": 16,
+			"frame_count": 1,
+			"columns": 1,
+			"name_pattern": "{model}.png",
+		},
+	})
+
+	await _dock.run_config(profile_path)
+
+	assert_str(_dock._profile_path_edit.text).is_equal(profile_path)
+	assert_str(_dock._output_path_edit.text).is_equal("")
+	assert_int(int(_dock._frame_width_spin.value)).is_equal(16)
+	assert_int(int(_dock._frame_height_spin.value)).is_equal(16)
+	assert_str(_dock._name_pattern_edit.text).is_equal("{model}.png")
+	assert_str(_dock._export_result_label.text).is_equal("Choose an output folder before exporting.")
+
+
+func test_profile_store_detects_runnable_config_json() -> void:
+	var config_path := _temp_resource_path("runnable_config.json")
+	var plain_json_path := _temp_resource_path("plain_json.json")
+	_write_json_file(config_path, {
+		"format": SpriteSheetRendererDock.PROFILE_FORMAT,
+		"export": {},
+	})
+	_write_json_file(plain_json_path, {
+		"name": "not a Fake3D config",
+	})
+
+	assert_bool(ProfileStore.is_runnable_config_path(config_path)).is_true()
+	assert_bool(ProfileStore.is_runnable_config_path(plain_json_path)).is_false()
+	assert_bool(ProfileStore.is_runnable_config_path("res://missing_config.json")).is_false()
 
 
 func test_load_profile_accepts_minimal_position_rotation_definition() -> void:

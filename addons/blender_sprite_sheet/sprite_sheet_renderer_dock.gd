@@ -815,6 +815,17 @@ func _on_export_pressed() -> void:
 	await _export_sprite_sheets()
 
 
+func run_config(path: String) -> void:
+	if _is_exporting:
+		return
+
+	var result := _load_profile(path)
+	if not result.ok:
+		return
+
+	await _export_sprite_sheets()
+
+
 func _load_source(path: String) -> Dictionary:
 	return _set_model_entries([_make_model_entry(path, _material_path_edit.text, _texture_path_edit.text)], 0)
 
@@ -1370,6 +1381,9 @@ func _apply_scene_settings(profile: Dictionary) -> void:
 		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
 		if _name_pattern_edit.text.is_empty():
 			_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
+		var output_directory := str(export_settings.get("output_directory", export_settings.get("output_path", ""))).strip_edges()
+		if not output_directory.is_empty():
+			_output_path_edit.text = Exporter.normalize_output_directory(output_directory)
 
 	_sync_object_from_controls()
 	_sync_camera_from_controls()
@@ -1451,6 +1465,9 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
 		if _name_pattern_edit.text.is_empty():
 			_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
+		var output_directory := str(export_settings.get("output_directory", export_settings.get("output_path", ""))).strip_edges()
+		if not output_directory.is_empty():
+			_output_path_edit.text = Exporter.normalize_output_directory(output_directory)
 
 	_sync_object_from_controls()
 	_sync_camera_from_controls()

@@ -32,6 +32,26 @@ static func load_profile(path: String) -> Dictionary:
 	return load_config(path)
 
 
+static func is_runnable_config_path(path: String) -> bool:
+	var normalized_path := normalize_path(path)
+	if normalized_path.is_empty() or normalized_path.get_extension().to_lower() != "json":
+		return false
+
+	var result := load_config(normalized_path)
+	return result.ok and is_runnable_config(result.config)
+
+
+static func is_runnable_config(config: Dictionary) -> bool:
+	if str(config.get("format", "")).strip_edges() == FORMAT:
+		return true
+
+	for key in ["models", "object", "settings", "export", "source_path", "source_paths"]:
+		if config.has(key):
+			return true
+
+	return false
+
+
 static func save_config(path: String, config: Dictionary) -> Dictionary:
 	var normalized_path := normalize_path(path)
 	if normalized_path.is_empty():
