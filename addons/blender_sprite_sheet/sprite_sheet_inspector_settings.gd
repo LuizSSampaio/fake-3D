@@ -11,6 +11,7 @@ const DEFAULT_BACKGROUND_COLOR := Color(0.12, 0.12, 0.12, 1.0)
 
 @export_group("Camera")
 @export_enum("Perspective", "Orthographic")
+# 0 = perspective, 1 = orthographic
 var camera_projection: int = 0
 @export_range(1.0, 179.0, 0.1, "or_less,or_greater")
 var camera_fov: float = 70.0

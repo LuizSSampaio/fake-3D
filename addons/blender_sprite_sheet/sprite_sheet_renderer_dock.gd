@@ -78,7 +78,8 @@ var _export_button: Button
 var _export_result_label: Label
 var _properties_inspector: EditorInspector
 var _inspector_settings: InspectorSettings
-var _hidden_legacy_controls: Control
+var _inspector_sync_controls: Control
+var _properties_inspector_bound := false
 var _loaded_source: Node
 var _active_profile: Dictionary = {}
 var _source_paths := PackedStringArray()
@@ -123,11 +124,11 @@ func _build_ui() -> void:
 	content.add_child(ControlFactory.create_section_label("Preview"))
 	content.add_child(_create_preview_controls())
 
-	_hidden_legacy_controls = VBoxContainer.new()
-	_hidden_legacy_controls.visible = false
-	_hidden_legacy_controls.add_child(_create_object_controls())
-	_hidden_legacy_controls.add_child(_create_background_controls())
-	add_child(_hidden_legacy_controls)
+	_inspector_sync_controls = VBoxContainer.new()
+	_inspector_sync_controls.visible = false
+	_inspector_sync_controls.add_child(_create_object_controls())
+	_inspector_sync_controls.add_child(_create_background_controls())
+	add_child(_inspector_sync_controls)
 
 	content.add_child(ControlFactory.create_section_label("Properties"))
 	content.add_child(_create_properties_controls())
@@ -1113,8 +1114,8 @@ func _sync_inspector_settings_from_controls() -> void:
 		_transparent_background_check,
 		_background_color_picker
 	)
-	_inspector_settings.emit_changed()
-	_refresh_properties_inspector()
+	if _properties_inspector_bound:
+		_inspector_settings.emit_changed()
 
 
 func _apply_inspector_settings_to_controls() -> void:
@@ -1139,8 +1140,9 @@ func _refresh_properties_inspector() -> void:
 	if _properties_inspector == null or _inspector_settings == null:
 		return
 
-	if _properties_inspector.get_edited_object() != _inspector_settings:
+	if not _properties_inspector_bound:
 		_properties_inspector.edit(_inspector_settings)
+		_properties_inspector_bound = true
 
 
 func _on_properties_inspector_edited(_property: String) -> void:
