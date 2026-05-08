@@ -83,6 +83,9 @@ var _animation_frame_label: Label
 var _avoid_duplicate_loop_frame_check: CheckBox
 var _output_path_edit: LineEdit
 var _export_individual_frames_check: CheckBox
+var _export_metadata_check: CheckBox
+var _export_sprite_frames_check: CheckBox
+var _overwrite_existing_check: CheckBox
 var _export_button: Button
 var _export_result_label: Label
 var _loaded_source: Node
@@ -589,6 +592,19 @@ func _create_export_controls() -> Control:
 	_export_individual_frames_check = CheckBox.new()
 	_export_individual_frames_check.text = "Export individual frames"
 	output_controls.add_child(_export_individual_frames_check)
+
+	_export_metadata_check = CheckBox.new()
+	_export_metadata_check.text = "Export metadata JSON"
+	output_controls.add_child(_export_metadata_check)
+
+	_export_sprite_frames_check = CheckBox.new()
+	_export_sprite_frames_check.text = "Export SpriteFrames resource"
+	output_controls.add_child(_export_sprite_frames_check)
+
+	_overwrite_existing_check = CheckBox.new()
+	_overwrite_existing_check.text = "Overwrite existing files"
+	_overwrite_existing_check.button_pressed = true
+	output_controls.add_child(_overwrite_existing_check)
 	_add_collapsible_section(container, "Output", output_controls, false, true)
 
 	_export_button = Button.new()
@@ -1399,6 +1415,9 @@ func _apply_scene_settings(profile: Dictionary) -> void:
 		ControlFactory.select_option_by_id(_anisotropic_filtering_option, int(render_settings["anisotropic_filtering"]))
 		_select_output_format(export_settings.get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT))
 		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
+		_export_metadata_check.button_pressed = bool(export_settings.get("export_metadata", _export_metadata_check.button_pressed))
+		_export_sprite_frames_check.button_pressed = bool(export_settings.get("export_sprite_frames", _export_sprite_frames_check.button_pressed))
+		_overwrite_existing_check.button_pressed = bool(export_settings.get("overwrite_existing", _overwrite_existing_check.button_pressed))
 		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
 		if _name_pattern_edit.text.is_empty():
 			_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
@@ -1485,6 +1504,9 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 		ControlFactory.select_option_by_id(_anisotropic_filtering_option, int(render_settings["anisotropic_filtering"]))
 		_select_output_format(export_settings.get("output_format", Exporter.DEFAULT_OUTPUT_FORMAT))
 		_export_individual_frames_check.button_pressed = bool(export_settings.get("export_individual_frames", _export_individual_frames_check.button_pressed))
+		_export_metadata_check.button_pressed = bool(export_settings.get("export_metadata", _export_metadata_check.button_pressed))
+		_export_sprite_frames_check.button_pressed = bool(export_settings.get("export_sprite_frames", _export_sprite_frames_check.button_pressed))
+		_overwrite_existing_check.button_pressed = bool(export_settings.get("overwrite_existing", _overwrite_existing_check.button_pressed))
 		_name_pattern_edit.text = str(export_settings.get("name_pattern", _name_pattern_edit.text)).strip_edges()
 		if _name_pattern_edit.text.is_empty():
 			_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
@@ -1815,6 +1837,9 @@ func _collect_export_settings() -> Dictionary:
 		"output_directory": _output_path_edit.text.strip_edges(),
 		"output_format": _get_selected_output_format(),
 		"export_individual_frames": _export_individual_frames_check.button_pressed,
+		"export_metadata": _export_metadata_check.button_pressed,
+		"export_sprite_frames": _export_sprite_frames_check.button_pressed,
+		"overwrite_existing": _overwrite_existing_check.button_pressed,
 		"name_pattern": Exporter.normalize_name_pattern_extension(_name_pattern_edit.text, _get_selected_output_format()),
 	}
 

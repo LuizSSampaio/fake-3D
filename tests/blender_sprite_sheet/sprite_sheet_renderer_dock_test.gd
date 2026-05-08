@@ -57,6 +57,9 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_str(_dock._output_path_edit.placeholder_text).is_equal("res://exports")
 	assert_str(_dock._name_pattern_edit.text).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_NAME_PATTERN)
 	assert_str(_dock._get_selected_output_format()).is_equal(SpriteSheetExporter.DEFAULT_OUTPUT_FORMAT)
+	assert_bool(_dock._export_metadata_check.button_pressed).is_false()
+	assert_bool(_dock._export_sprite_frames_check.button_pressed).is_false()
+	assert_bool(_dock._overwrite_existing_check.button_pressed).is_true()
 	assert_bool(_dock._background_color_picker.disabled).is_true()
 	assert_object(_dock._object_root).is_not_null()
 	assert_vector(_dock._object_root.position).is_equal(SpriteSheetRendererDock.DEFAULT_OBJECT_POSITION)
@@ -577,6 +580,9 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	_select_option_by_id(_dock._anisotropic_filtering_option, Viewport.ANISOTROPY_16X)
 	_dock._select_output_format("webp")
 	_dock._export_individual_frames_check.button_pressed = true
+	_dock._export_metadata_check.button_pressed = true
+	_dock._export_sprite_frames_check.button_pressed = true
+	_dock._overwrite_existing_check.button_pressed = false
 	_dock._name_pattern_edit.text = "{index}_{model}.png"
 	var profile_base_path := _temp_resource_path("book_profile")
 
@@ -628,6 +634,9 @@ func test_profile_save_writes_reusable_json_without_source_or_output_paths() -> 
 	assert_int(int(profile.export.anisotropic_filtering)).is_equal(Viewport.ANISOTROPY_16X)
 	assert_str(profile.export.output_format).is_equal("webp")
 	assert_bool(bool(profile.export.export_individual_frames)).is_true()
+	assert_bool(bool(profile.export.export_metadata)).is_true()
+	assert_bool(bool(profile.export.export_sprite_frames)).is_true()
+	assert_bool(bool(profile.export.overwrite_existing)).is_false()
 	assert_str(profile.export.name_pattern).is_equal("{index}_{model}.webp")
 
 
@@ -694,6 +703,9 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 			"anisotropic_filtering": Viewport.ANISOTROPY_16X,
 			"output_format": "jpg",
 			"export_individual_frames": true,
+			"export_metadata": true,
+			"export_sprite_frames": true,
+			"overwrite_existing": false,
 			"name_pattern": "{model}_{index}.png",
 			"output_directory": output_dir,
 		},
@@ -739,6 +751,9 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	assert_int(_dock._viewport.anisotropic_filtering_level).is_equal(Viewport.ANISOTROPY_16X)
 	assert_str(_dock._get_selected_output_format()).is_equal("jpg")
 	assert_bool(_dock._export_individual_frames_check.button_pressed).is_true()
+	assert_bool(_dock._export_metadata_check.button_pressed).is_true()
+	assert_bool(_dock._export_sprite_frames_check.button_pressed).is_true()
+	assert_bool(_dock._overwrite_existing_check.button_pressed).is_false()
 	assert_str(_dock._name_pattern_edit.text).is_equal("{model}_{index}.jpg")
 	assert_str(_dock._output_path_edit.text).is_equal(output_dir)
 
@@ -781,6 +796,9 @@ func test_run_config_loads_profile_and_runs_export_validation() -> void:
 			"frame_height": 16,
 			"frame_count": 1,
 			"columns": 1,
+			"export_metadata": true,
+			"export_sprite_frames": true,
+			"overwrite_existing": false,
 			"name_pattern": "{model}.png",
 		},
 	})
@@ -791,6 +809,9 @@ func test_run_config_loads_profile_and_runs_export_validation() -> void:
 	assert_str(_dock._output_path_edit.text).is_equal("")
 	assert_int(int(_dock._frame_width_spin.value)).is_equal(16)
 	assert_int(int(_dock._frame_height_spin.value)).is_equal(16)
+	assert_bool(_dock._export_metadata_check.button_pressed).is_true()
+	assert_bool(_dock._export_sprite_frames_check.button_pressed).is_true()
+	assert_bool(_dock._overwrite_existing_check.button_pressed).is_false()
 	assert_str(_dock._name_pattern_edit.text).is_equal("{model}.png")
 	assert_str(_dock._export_result_label.text).is_equal("Choose an output folder before exporting.")
 
@@ -1068,6 +1089,79 @@ func test_exporter_writes_sprite_sheet_and_individual_png_frames() -> void:
 	var sheet := Image.load_from_file(output_path)
 	assert_object(sheet).is_not_null()
 	assert_vector(sheet.get_size()).is_equal(Vector2i(9, 4))
+
+
+func test_exporter_writes_metadata_json_and_sprite_frames_resource() -> void:
+	var output_path := _temp_resource_path("metadata_export.png")
+	var frames: Array[Image] = [
+		_create_color_image(4, 4, Color(1.0, 0.0, 0.0, 1.0)),
+		_create_color_image(4, 4, Color(0.0, 1.0, 0.0, 1.0)),
+		_create_color_image(4, 4, Color(0.0, 0.0, 1.0, 1.0)),
+	]
+	var settings := {
+		"source_path": "res://models/book.glb",
+		"animation_name": "Walk",
+		"frame_width": 4,
+		"frame_height": 4,
+		"frame_count": 3,
+		"columns": 2,
+		"frame_spacing": 1,
+		"output_path": output_path,
+		"output_format": "png",
+		"export_metadata": true,
+		"export_sprite_frames": true,
+	}
+
+	var export_result := SpriteSheetExporter.export_images(frames, settings)
+	var metadata_path := SpriteSheetExporter.get_metadata_path(output_path)
+	var sprite_frames_path := SpriteSheetExporter.get_sprite_frames_path(output_path)
+	var metadata := _read_json_file(metadata_path)
+	var sprite_frames := ResourceLoader.load(sprite_frames_path) as SpriteFrames
+
+	assert_bool(export_result.ok).is_true()
+	assert_array(Array(export_result.paths)).contains(output_path)
+	assert_array(Array(export_result.paths)).contains(metadata_path)
+	assert_array(Array(export_result.paths)).contains(sprite_frames_path)
+	assert_bool(FileAccess.file_exists(metadata_path)).is_true()
+	assert_bool(FileAccess.file_exists(sprite_frames_path)).is_true()
+	assert_str(metadata.format).is_equal(SpriteSheetExporter.METADATA_FORMAT)
+	assert_str(metadata.source_path).is_equal("res://models/book.glb")
+	assert_str(metadata.animation_name).is_equal("Walk")
+	assert_int(int(metadata.frame_count)).is_equal(3)
+	assert_int(int(metadata.columns)).is_equal(2)
+	assert_int(int(metadata.rows)).is_equal(2)
+	assert_int(int(metadata.sheet_width)).is_equal(9)
+	assert_int(int(metadata.sheet_height)).is_equal(9)
+	assert_int(metadata.frames.size()).is_equal(3)
+	assert_int(int(metadata.frames[1].x)).is_equal(5)
+	assert_int(int(metadata.frames[2].y)).is_equal(5)
+	assert_object(sprite_frames).is_not_null()
+	assert_bool(sprite_frames.has_animation(SpriteSheetExporter.SPRITE_FRAMES_ANIMATION)).is_true()
+	assert_int(sprite_frames.get_frame_count(SpriteSheetExporter.SPRITE_FRAMES_ANIMATION)).is_equal(3)
+
+
+func test_exporter_rejects_existing_outputs_when_overwrite_is_disabled() -> void:
+	var output_path := _temp_resource_path("overwrite_export.png")
+	var frames: Array[Image] = [
+		_create_color_image(4, 4, Color(1.0, 0.0, 0.0, 1.0)),
+	]
+	_write_text_file(SpriteSheetExporter.get_metadata_path(output_path), "{}")
+	var settings := {
+		"frame_width": 4,
+		"frame_height": 4,
+		"frame_count": 1,
+		"columns": 1,
+		"frame_spacing": 0,
+		"output_path": output_path,
+		"export_metadata": true,
+		"overwrite_existing": false,
+	}
+
+	var export_result := SpriteSheetExporter.export_images(frames, settings)
+
+	assert_bool(export_result.ok).is_false()
+	assert_str(export_result.message).contains("already exists")
+	assert_bool(FileAccess.file_exists(output_path)).is_false()
 
 
 func test_exporter_writes_supported_image_formats() -> void:

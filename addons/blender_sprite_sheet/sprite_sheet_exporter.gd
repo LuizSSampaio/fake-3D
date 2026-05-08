@@ -6,6 +6,9 @@ const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_r
 const DEFAULT_FRAME_DIGITS := 3
 const DEFAULT_OUTPUT_NAME_PATTERN := "{model}.png"
 const DEFAULT_OUTPUT_FORMAT := "png"
+const METADATA_FORMAT := "blender_sprite_sheet.metadata"
+const METADATA_VERSION := 1
+const SPRITE_FRAMES_ANIMATION := "default"
 const OUTPUT_FORMATS := [
 	{"label": "PNG", "key": "png", "extension": "png"},
 	{"label": "WebP", "key": "webp", "extension": "webp"},
@@ -292,6 +295,12 @@ static func export_images(frames: Array[Image], settings: Dictionary) -> Diction
 		return _failure("Unsupported export format: \"%s\"." % str(settings.get("output_format", "")).strip_edges())
 
 	var output_path := normalize_output_path(str(settings["output_path"]), output_format)
+	var planned_paths := get_export_paths(output_path, frames.size(), settings)
+	if not bool(settings.get("overwrite_existing", true)):
+		var conflict_path := _first_existing_path(planned_paths)
+		if not conflict_path.is_empty():
+			return _failure("Export path already exists: \"%s\"." % conflict_path)
+
 	var exported_paths: PackedStringArray = []
 	var sheet := assemble_sprite_sheet(frames, frame_width, frame_height, columns, frame_spacing, resize_filter)
 	var sheet_error := _save_image(sheet, output_path, output_format)
@@ -311,9 +320,25 @@ static func export_images(frames: Array[Image], settings: Dictionary) -> Diction
 			exported_paths.append(frame_paths[index])
 
 	var layout := calculate_layout(frames.size(), columns, frame_width, frame_height, frame_spacing)
+	if bool(settings.get("export_metadata", false)):
+		var metadata_path := get_metadata_path(output_path)
+		var metadata_result := write_metadata(metadata_path, build_metadata(frames.size(), settings, layout))
+		if not metadata_result.ok:
+			_delete_exported_paths(exported_paths)
+			return metadata_result
+		exported_paths.append(metadata_path)
+
+	if bool(settings.get("export_sprite_frames", false)):
+		var sprite_frames_path := get_sprite_frames_path(output_path)
+		var sprite_frames_result := write_sprite_frames(sprite_frames_path, frames, settings)
+		if not sprite_frames_result.ok:
+			_delete_exported_paths(exported_paths)
+			return sprite_frames_result
+		exported_paths.append(sprite_frames_path)
+
 	return {
 		"ok": true,
-		"message": "Exported %s." % format_export_file_count(exported_paths.size(), output_format),
+		"message": "Exported %s." % _format_exported_paths(exported_paths, output_format),
 		"paths": exported_paths,
 		"sheet_size": layout.sheet_size,
 	}
@@ -339,6 +364,117 @@ static func get_individual_frame_paths(output_path: String, frame_count: int, ou
 	for index in range(frame_count):
 		paths.append("%s_%s.%s" % [base_path, str(index).pad_zeros(digits), extension])
 	return paths
+
+
+static func get_metadata_path(output_path: String) -> String:
+	return "%s.json" % output_path.strip_edges().get_basename()
+
+
+static func get_sprite_frames_path(output_path: String) -> String:
+	return "%s_sprite_frames.tres" % output_path.strip_edges().get_basename()
+
+
+static func get_export_paths(output_path: String, frame_count: int, settings: Dictionary) -> PackedStringArray:
+	var output_format := normalize_output_format(settings.get("output_format", output_path.get_extension()))
+	if output_format.is_empty():
+		output_format = DEFAULT_OUTPUT_FORMAT
+
+	var normalized_output_path := normalize_output_path(output_path, output_format)
+	var paths := PackedStringArray()
+	paths.append(normalized_output_path)
+
+	if bool(settings.get("export_individual_frames", false)):
+		paths.append_array(get_individual_frame_paths(normalized_output_path, frame_count, output_format))
+
+	if bool(settings.get("export_metadata", false)):
+		paths.append(get_metadata_path(normalized_output_path))
+
+	if bool(settings.get("export_sprite_frames", false)):
+		paths.append(get_sprite_frames_path(normalized_output_path))
+
+	return paths
+
+
+static func build_metadata(frame_count: int, settings: Dictionary, layout := {}) -> Dictionary:
+	var frame_width := int(settings.get("frame_width", 0))
+	var frame_height := int(settings.get("frame_height", 0))
+	var columns := int(settings.get("columns", 1))
+	var frame_spacing := int(settings.get("frame_spacing", 0))
+	var resolved_layout: Dictionary = layout if layout is Dictionary and not layout.is_empty() else calculate_layout(frame_count, columns, frame_width, frame_height, frame_spacing)
+
+	var frames := []
+	for index in range(frame_count):
+		var column: int = index % int(resolved_layout["columns"])
+		var row := int(index / int(resolved_layout["columns"]))
+		frames.append({
+			"index": index,
+			"x": column * (frame_width + frame_spacing),
+			"y": row * (frame_height + frame_spacing),
+			"width": frame_width,
+			"height": frame_height,
+		})
+
+	return {
+		"format": METADATA_FORMAT,
+		"version": METADATA_VERSION,
+		"source_path": str(settings.get("source_path", "")),
+		"animation_name": str(settings.get("animation_name", "")),
+		"output_path": normalize_output_path(str(settings.get("output_path", "")), settings.get("output_format", DEFAULT_OUTPUT_FORMAT)),
+		"output_format": normalize_output_format(settings.get("output_format", DEFAULT_OUTPUT_FORMAT)),
+		"frame_count": frame_count,
+		"frame_width": frame_width,
+		"frame_height": frame_height,
+		"columns": int(resolved_layout["columns"]),
+		"rows": int(resolved_layout["rows"]),
+		"frame_spacing": frame_spacing,
+		"sheet_width": Vector2i(resolved_layout["sheet_size"]).x,
+		"sheet_height": Vector2i(resolved_layout["sheet_size"]).y,
+		"transparent_background": bool(settings.get("transparent_background", true)),
+		"frames": frames,
+	}
+
+
+static func write_metadata(metadata_path: String, metadata: Dictionary) -> Dictionary:
+	var file := FileAccess.open(metadata_path, FileAccess.WRITE)
+	if file == null:
+		return _failure("Metadata JSON write failed: %s." % error_string(FileAccess.get_open_error()))
+
+	file.store_string(JSON.stringify(metadata, "\t"))
+	file.flush()
+	file.close()
+	return {
+		"ok": true,
+		"path": metadata_path,
+	}
+
+
+static func write_sprite_frames(sprite_frames_path: String, frames: Array[Image], settings: Dictionary) -> Dictionary:
+	if frames.is_empty():
+		return _failure("No rendered frames were available for SpriteFrames export.")
+
+	var sprite_frames := SpriteFrames.new()
+	if not sprite_frames.has_animation(SPRITE_FRAMES_ANIMATION):
+		sprite_frames.add_animation(SPRITE_FRAMES_ANIMATION)
+	sprite_frames.clear(SPRITE_FRAMES_ANIMATION)
+	sprite_frames.set_animation_loop(SPRITE_FRAMES_ANIMATION, true)
+	sprite_frames.set_animation_speed(SPRITE_FRAMES_ANIMATION, max(1.0, float(settings.get("sprite_frames_fps", settings.get("frame_count", frames.size())))))
+
+	var frame_width := int(settings.get("frame_width", frames[0].get_width()))
+	var frame_height := int(settings.get("frame_height", frames[0].get_height()))
+	var resize_filter := RenderOptions.get_resize_filter(settings)
+	for frame in frames:
+		var frame_image := _copy_frame_at_size(frame, frame_width, frame_height, resize_filter)
+		var texture := ImageTexture.create_from_image(frame_image)
+		sprite_frames.add_frame(SPRITE_FRAMES_ANIMATION, texture)
+
+	var save_error := ResourceSaver.save(sprite_frames, sprite_frames_path)
+	if save_error != OK:
+		return _failure("SpriteFrames resource write failed: %s." % error_string(save_error))
+
+	return {
+		"ok": true,
+		"path": sprite_frames_path,
+	}
 
 
 static func _copy_frame_at_size(frame: Image, frame_width: int, frame_height: int, resize_filter := Image.INTERPOLATE_LANCZOS) -> Image:
@@ -383,9 +519,27 @@ static func _strip_trailing_slashes(path: String) -> String:
 
 static func _delete_exported_paths(paths: PackedStringArray) -> void:
 	for path in paths:
-		var absolute_path := ProjectSettings.globalize_path(path) if path.begins_with("res://") or path.begins_with("user://") else path
-		if FileAccess.file_exists(absolute_path):
-			DirAccess.remove_absolute(absolute_path)
+		if _file_exists(path):
+			DirAccess.remove_absolute(_absolute_path(path))
+
+
+static func _first_existing_path(paths: PackedStringArray) -> String:
+	for path in paths:
+		if _file_exists(path):
+			return path
+
+	return ""
+
+
+static func _file_exists(path: String) -> bool:
+	return FileAccess.file_exists(_absolute_path(path))
+
+
+static func _absolute_path(path: String) -> String:
+	if path.begins_with("res://") or path.begins_with("user://"):
+		return ProjectSettings.globalize_path(path)
+
+	return path
 
 
 static func _is_supported_output_extension(extension: String) -> bool:
@@ -394,6 +548,20 @@ static func _is_supported_output_extension(extension: String) -> bool:
 
 static func format_export_file_count(count: int, output_format: Variant) -> String:
 	return "%d %s %s" % [count, get_output_format_label(output_format), "file" if count == 1 else "files"]
+
+
+static func _format_exported_paths(paths: PackedStringArray, output_format: Variant) -> String:
+	var image_extension := get_output_format_extension(output_format).to_lower()
+	var image_only := true
+	for path in paths:
+		if path.get_extension().to_lower() != image_extension:
+			image_only = false
+			break
+
+	if image_only:
+		return format_export_file_count(paths.size(), output_format)
+
+	return "%d %s" % [paths.size(), "file" if paths.size() == 1 else "files"]
 
 
 static func _save_image(image: Image, output_path: String, output_format: String) -> Error:
