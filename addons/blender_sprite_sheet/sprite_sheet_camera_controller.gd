@@ -1,12 +1,14 @@
 @tool
 extends RefCounted
 
+const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
+
 
 static func sync_from_controls(
 	camera: Camera3D,
 	projection_option: OptionButton,
-	fov_spin: SpinBox,
-	orthographic_size_spin: SpinBox,
+	fov_spin: Range,
+	orthographic_size_spin: Range,
 	fixed_position: Vector3,
 	fixed_rotation: Vector3
 ) -> void:
@@ -18,14 +20,14 @@ static func sync_from_controls(
 	camera.projection = projection_option.get_item_id(projection_option.selected)
 	camera.fov = fov_spin.value
 	camera.size = orthographic_size_spin.value
-	orthographic_size_spin.editable = camera.projection == Camera3D.PROJECTION_ORTHOGONAL
-	fov_spin.editable = camera.projection == Camera3D.PROJECTION_PERSPECTIVE
+	ControlFactory.set_numeric_read_only(orthographic_size_spin, camera.projection != Camera3D.PROJECTION_ORTHOGONAL)
+	ControlFactory.set_numeric_read_only(fov_spin, camera.projection != Camera3D.PROJECTION_PERSPECTIVE)
 
 
 static func sync_object_from_controls(
 	object_root: Node3D,
-	position_controls: Array[SpinBox],
-	rotation_controls: Array[SpinBox]
+	position_controls: Array[Range],
+	rotation_controls: Array[Range]
 ) -> void:
 	if not object_root:
 		return
@@ -44,8 +46,8 @@ static func sync_object_from_controls(
 
 static func frame_bounds(
 	camera: Camera3D,
-	fov_spin: SpinBox,
-	orthographic_size_spin: SpinBox,
+	fov_spin: Range,
+	orthographic_size_spin: Range,
 	projection_option: OptionButton,
 	bounds: AABB,
 	preview_margin: float,
@@ -57,13 +59,13 @@ static func frame_bounds(
 	sync_from_controls(camera, projection_option, fov_spin, orthographic_size_spin, fixed_position, fixed_rotation)
 
 
-static func set_vector3_controls(controls: Array[SpinBox], value: Vector3) -> void:
+static func set_vector3_controls(controls: Array[Range], value: Vector3) -> void:
 	controls[0].set_value_no_signal(value.x)
 	controls[1].set_value_no_signal(value.y)
 	controls[2].set_value_no_signal(value.z)
 
 
-static func get_vector3_from_controls(controls: Array[SpinBox], fallback := Vector3.ZERO) -> Vector3:
+static func get_vector3_from_controls(controls: Array[Range], fallback := Vector3.ZERO) -> Vector3:
 	if controls.size() < 3:
 		return fallback
 

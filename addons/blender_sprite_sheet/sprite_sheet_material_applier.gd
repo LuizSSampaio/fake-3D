@@ -32,7 +32,7 @@ static func apply_to_model(root: Node, material_path: String, texture_path: Stri
 		if has_object_property(material, "albedo_texture"):
 			material.set("albedo_texture", texture)
 		else:
-			return _failure("Selected material does not support an albedo texture property.")
+			return _failure("Selected material doesn't support an albedo texture property.")
 
 	set_mesh_surface_override(root, material)
 	return _success("Applied preview material to loaded model.")
@@ -56,11 +56,11 @@ static func has_object_property(object: Object, property_name: String) -> bool:
 
 static func _load_material(path: String) -> Dictionary:
 	if not ResourceLoader.exists(path):
-		return _failure("Material resource does not exist: %s" % path)
+		return _failure("Material resource doesn't exist: \"%s\"." % path)
 
 	var material_resource := ResourceLoader.load(path)
 	if not (material_resource is Material):
-		return _failure("Selected resource is not a Material: %s" % path)
+		return _failure("Selected resource isn't a Material: \"%s\"." % path)
 
 	return {
 		"ok": true,
@@ -70,11 +70,11 @@ static func _load_material(path: String) -> Dictionary:
 
 static func _load_texture(path: String) -> Dictionary:
 	if not ResourceLoader.exists(path):
-		return _failure("Texture resource does not exist: %s" % path)
+		return _failure("Texture resource doesn't exist: \"%s\"." % path)
 
 	var texture_resource := ResourceLoader.load(path)
 	if not (texture_resource is Texture2D):
-		return _failure("Selected resource is not a Texture2D: %s" % path)
+		return _failure("Selected resource isn't a Texture2D: \"%s\"." % path)
 
 	return {
 		"ok": true,

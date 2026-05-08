@@ -23,7 +23,7 @@ static func validate_export_settings(settings: Dictionary, has_loaded_source: bo
 
 	var base_dir := output_path.get_base_dir()
 	if base_dir.is_empty() or not _directory_exists(base_dir):
-		return _failure("Export directory does not exist: %s" % base_dir)
+		return _failure("Export directory doesn't exist: \"%s\"." % base_dir)
 
 	normalized_settings["output_path"] = output_path
 	return {
@@ -44,7 +44,7 @@ static func validate_export_directory_settings(settings: Dictionary, has_loaded_
 		return _failure("Choose an output folder before exporting.")
 
 	if not _directory_exists(output_directory):
-		return _failure("Export folder does not exist: %s" % output_directory)
+		return _failure("Export folder doesn't exist: \"%s\"." % output_directory)
 
 	normalized_settings["output_directory"] = output_directory
 	normalized_settings.erase("output_path")
@@ -74,7 +74,7 @@ static func _validate_common_settings(settings: Dictionary, has_loaded_source: b
 		return _failure("Columns per row must be greater than zero.")
 
 	if frame_spacing < 0:
-		return _failure("Frame spacing cannot be negative.")
+		return _failure("Frame spacing can't be negative.")
 
 	var normalized_settings := settings.duplicate()
 	normalized_settings["frame_width"] = frame_width
@@ -208,7 +208,7 @@ static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionar
 	var sheet := assemble_sprite_sheet(frames, frame_width, frame_height, columns, frame_spacing, resize_filter)
 	var sheet_error := sheet.save_png(output_path)
 	if sheet_error != OK:
-		return _failure("Image encoding failed for sprite sheet: %s" % error_string(sheet_error))
+		return _failure("Image encoding failed for sprite sheet: %s." % error_string(sheet_error))
 
 	exported_paths.append(output_path)
 
@@ -219,13 +219,13 @@ static func export_pngs(frames: Array[Image], settings: Dictionary) -> Dictionar
 			var frame_error := frame.save_png(frame_paths[index])
 			if frame_error != OK:
 				_delete_exported_paths(exported_paths)
-				return _failure("Image encoding failed for frame %d: %s" % [index, error_string(frame_error)])
+				return _failure("Image encoding failed for frame %d: %s." % [index, error_string(frame_error)])
 			exported_paths.append(frame_paths[index])
 
 	var layout := calculate_layout(frames.size(), columns, frame_width, frame_height, frame_spacing)
 	return {
 		"ok": true,
-		"message": "Exported %d PNG file(s)." % exported_paths.size(),
+		"message": _format_png_count(exported_paths.size()),
 		"paths": exported_paths,
 		"sheet_size": layout.sheet_size,
 	}
@@ -285,6 +285,10 @@ static func _delete_exported_paths(paths: PackedStringArray) -> void:
 		var absolute_path := ProjectSettings.globalize_path(path) if path.begins_with("res://") or path.begins_with("user://") else path
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(absolute_path)
+
+
+static func _format_png_count(count: int) -> String:
+	return "Exported %d PNG %s." % [count, "file" if count == 1 else "files"]
 
 
 static func _failure(message: String) -> Dictionary:

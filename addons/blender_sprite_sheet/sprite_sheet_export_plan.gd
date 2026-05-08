@@ -23,10 +23,10 @@ static func build(base_settings: Dictionary, source_paths: PackedStringArray, na
 	for index in range(source_paths.size()):
 		var source_path := source_paths[index]
 		if not SourceLoader.is_supported_source_path(source_path):
-			return _failure("%s: %s" % [source_path, SourceLoader.UNSUPPORTED_SOURCE_MESSAGE])
+			return _failure("Unsupported source path \"%s\". Choose .tscn, .scn, .glb, .gltf, .obj, .fbx, or .blend." % source_path)
 
 		if not ResourceLoader.exists(source_path):
-			return _failure("Source asset does not exist: %s" % source_path)
+			return _failure("Source asset doesn't exist: \"%s\"." % source_path)
 
 		var item_settings := _settings_for_source(
 			normalized_settings,
@@ -41,7 +41,7 @@ static func build(base_settings: Dictionary, source_paths: PackedStringArray, na
 
 		var output_path: String = item_validation.settings.output_path
 		if output_paths.has(output_path):
-			return _failure("File naming pattern creates a duplicate output path: %s" % output_path)
+			return _failure("File naming pattern creates a duplicate output path: \"%s\"." % output_path)
 
 		output_paths[output_path] = true
 		items.append(item_validation.settings)

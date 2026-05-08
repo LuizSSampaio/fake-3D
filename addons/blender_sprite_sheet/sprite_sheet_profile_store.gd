@@ -29,14 +29,14 @@ static func save_profile(path: String, profile: Dictionary) -> Dictionary:
 
 	var file := FileAccess.open(normalized_path, FileAccess.WRITE)
 	if file == null:
-		return _failure("Could not save profile: %s" % error_string(FileAccess.get_open_error()))
+		return _failure("Couldn't save profile: %s." % error_string(FileAccess.get_open_error()))
 
 	file.store_string(JSON.stringify(profile, "\t"))
 	file.flush()
 	file.close()
 	return {
 		"ok": true,
-		"message": "Saved profile %s" % normalized_path.get_file(),
+		"message": "Saved profile \"%s\"." % normalized_path.get_file(),
 		"path": normalized_path,
 		"profile": profile.duplicate(true),
 	}
@@ -52,7 +52,7 @@ static func load_profile(path: String) -> Dictionary:
 
 	var file := FileAccess.open(normalized_path, FileAccess.READ)
 	if file == null:
-		return _failure("Could not load profile: %s" % error_string(FileAccess.get_open_error()))
+		return _failure("Couldn't load profile: %s." % error_string(FileAccess.get_open_error()))
 
 	var profile_text := file.get_as_text()
 	file.close()
@@ -60,7 +60,7 @@ static func load_profile(path: String) -> Dictionary:
 	var json := JSON.new()
 	var error := json.parse(profile_text)
 	if error != OK:
-		return _failure("Profile JSON is invalid at line %d: %s" % [json.get_error_line(), json.get_error_message()])
+		return _failure("Profile JSON is invalid at line %d: %s." % [json.get_error_line(), json.get_error_message()])
 
 	if not (json.data is Dictionary):
 		return _failure("Profile JSON root must be an object.")
@@ -68,7 +68,7 @@ static func load_profile(path: String) -> Dictionary:
 	var profile: Dictionary = json.data
 	return {
 		"ok": true,
-		"message": "Loaded profile %s" % normalized_path.get_file(),
+		"message": "Loaded profile \"%s\"." % normalized_path.get_file(),
 		"path": normalized_path,
 		"profile": profile,
 	}

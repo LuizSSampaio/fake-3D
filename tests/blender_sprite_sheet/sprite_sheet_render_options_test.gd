@@ -30,6 +30,15 @@ func test_normalize_accepts_option_keys_and_defaults_unknown_values() -> void:
 	assert_int(defaults.resize_filter).is_equal(RenderOptions.DEFAULT_RESIZE_FILTER)
 
 
+func test_quality_options_include_style_guide_performance_hints() -> void:
+	assert_str(RenderOptions.get_msaa_options()[0].label).is_equal("Disabled (Fastest)")
+	assert_str(RenderOptions.get_msaa_options().back().label).contains("(Slow)")
+	assert_str(RenderOptions.get_screen_space_aa_options()[1].label).is_equal("FXAA (Fast)")
+	assert_str(RenderOptions.get_supersample_options().back().label).is_equal("4x (Slowest)")
+	assert_str(RenderOptions.get_resize_filter_options().back().label).is_equal("Lanczos (Slowest)")
+	assert_str(RenderOptions.get_anisotropic_filtering_options().back().label).is_equal("16x (Slower)")
+
+
 func test_apply_to_viewport_sets_antialiasing_and_texture_filtering() -> void:
 	var viewport: SubViewport = auto_free(SubViewport.new())
 

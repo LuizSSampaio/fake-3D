@@ -5,6 +5,7 @@ const SpriteSheetRendererDock := preload("res://addons/blender_sprite_sheet/spri
 const SpriteSheetExporter := preload("res://addons/blender_sprite_sheet/sprite_sheet_exporter.gd")
 const ExportFrameOverlay := preload("res://addons/blender_sprite_sheet/export_frame_overlay.gd")
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
+const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
 const VECTOR_EPSILON := Vector3(0.001, 0.001, 0.001)
 
 var _dock: VBoxContainer
@@ -52,8 +53,8 @@ func test_ready_builds_preview_dock_defaults() -> void:
 	assert_vector(_dock._camera.position).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_POSITION)
 	assert_vector(_dock._camera.rotation_degrees).is_equal(SpriteSheetRendererDock.DEFAULT_CAMERA_ROTATION)
 	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_PERSPECTIVE)
-	assert_bool(_dock._camera_fov_spin.editable).is_true()
-	assert_bool(_dock._camera_orthographic_size_spin.editable).is_false()
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._camera_fov_spin)).is_false()
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._camera_orthographic_size_spin)).is_true()
 
 
 func test_source_path_validation_accepts_supported_extensions_case_insensitively() -> void:
@@ -72,7 +73,7 @@ func test_load_source_reports_actionable_status_for_invalid_paths() -> void:
 	assert_str(_dock._status_label.text).contains("Unsupported source type")
 
 	_dock._load_source("res://missing_model.glb")
-	assert_str(_dock._status_label.text).is_equal("Source asset does not exist: res://missing_model.glb")
+	assert_str(_dock._status_label.text).is_equal("Source asset doesn't exist: \"res://missing_model.glb\".")
 
 
 func test_calculate_model_bounds_merges_visible_meshes_and_ignores_hidden_meshes() -> void:
@@ -98,7 +99,7 @@ func test_load_source_instantiates_scene_fits_model_and_keeps_fixed_camera() -> 
 
 	_dock._load_source(source_path)
 
-	assert_str(_dock._status_label.text).is_equal("Loaded load_source_model.tscn")
+	assert_str(_dock._status_label.text).is_equal("Loaded \"load_source_model.tscn\".")
 	assert_object(_dock._loaded_source).is_not_null()
 	assert_int(_dock._model_root.get_child_count()).is_equal(1)
 	assert_int(_dock._source_paths.size()).is_equal(1)
@@ -143,7 +144,7 @@ func test_source_selection_deduplicates_and_previews_first_model() -> void:
 	assert_bool(_dock._source_remove_button.disabled).is_false()
 	assert_bool(_dock._source_clear_button.disabled).is_false()
 	assert_object(_dock._loaded_source).is_not_null()
-	assert_str(_dock._status_label.text).is_equal("Selected 2 source model(s).")
+	assert_str(_dock._status_label.text).is_equal("Selected 2 source models.")
 
 
 func test_source_controls_place_model_list_before_add_bar() -> void:
@@ -156,34 +157,66 @@ func test_source_controls_place_model_list_before_add_bar() -> void:
 	assert_int(source_container.get_child(1).get_instance_id()).is_equal(add_bar.get_instance_id())
 
 
-func test_editor_panel_uses_collapsible_sections_and_subsections() -> void:
-	for title in ["Models", "Preview", "Object", "Profile", "Material", "Background", "Export"]:
+func test_editor_panel_uses_foldable_sections_and_subsections() -> void:
+	for title in ["Models", "Object", "Settings", "Export"]:
 		var section := _find_collapsible_section(title)
 		assert_object(section).is_not_null()
-		assert_bool(_get_section_header(section).toggle_mode).is_true()
-		assert_bool(_get_section_body(section).visible).is_true()
+		assert_str(section.title).is_equal(title)
+		assert_bool(section.folded).is_false()
 
-	for title in ["Transform", "Camera", "Actions", "Sprite Sheet", "Quality", "Output"]:
+	for title in ["Sprite Sheet", "Quality", "Output"]:
 		assert_object(_find_collapsible_section(title, true)).is_not_null()
 
-	var preview_section := _find_collapsible_section("Preview")
-	var preview_header := _get_section_header(preview_section)
-	preview_header.button_pressed = false
-	assert_bool(_preview_stack_is_visible()).is_false()
-	assert_bool(preview_header.text.begins_with("> ")).is_true()
+	var object_section := _find_collapsible_section("Object")
+	object_section.fold()
+	await await_idle_frame()
+	assert_bool(_dock._object_position_controls[0].is_visible_in_tree()).is_false()
+	assert_bool(object_section.folded).is_true()
 
-	preview_header.button_pressed = true
-	assert_bool(_preview_stack_is_visible()).is_true()
-	assert_bool(preview_header.text.begins_with("v ")).is_true()
+	object_section.expand()
+	await await_idle_frame()
+	assert_bool(_dock._object_position_controls[0].is_visible_in_tree()).is_true()
+	assert_bool(object_section.folded).is_false()
 
 	var quality_section := _find_collapsible_section("Quality", true)
-	var quality_header := _get_section_header(quality_section)
-	assert_bool(quality_header.button_pressed).is_false()
-	assert_bool(_get_section_body(quality_section).visible).is_false()
+	assert_bool(quality_section.folded).is_true()
 
-	quality_header.button_pressed = true
-	assert_bool(_get_section_body(quality_section).visible).is_true()
-	assert_str(quality_header.text).contains("Quality")
+	quality_section.expand()
+	await await_idle_frame()
+	assert_bool(quality_section.folded).is_false()
+	assert_str(quality_section.title).is_equal("Quality")
+
+
+func test_foldable_sections_have_at_least_three_items() -> void:
+	for title in ["Models", "Object", "Settings", "Export", "Sprite Sheet", "Quality", "Output"]:
+		var section := _find_collapsible_section(title, title in ["Sprite Sheet", "Quality", "Output"])
+		var body := _get_foldable_body(section)
+		assert_int(body.get_child_count()).is_greater_equal(3)
+
+
+func test_editor_panel_uses_style_guide_button_text_and_tooltips() -> void:
+	var source_browse_button := _source_row_button(1)
+	assert_str(source_browse_button.text).is_equal("Browse...")
+	assert_str(source_browse_button.tooltip_text).is_equal("Choose one or more models to add.")
+
+	var profile_path_row: Node = _dock._profile_path_edit.get_parent()
+	var profile_browse_button := profile_path_row.get_child(profile_path_row.get_child_count() - 1) as Button
+	assert_str(profile_browse_button.text).is_equal("Browse...")
+
+	var output_path_row: Node = _dock._output_path_edit.get_parent()
+	var output_browse_button := output_path_row.get_child(output_path_row.get_child_count() - 1) as Button
+	assert_str(output_browse_button.text).is_equal("Browse...")
+	assert_str(_dock._output_path_edit.tooltip_text).is_equal("Choose where generated PNG files will be written.")
+	assert_str(_dock._name_pattern_edit.tooltip_text).contains("\n")
+
+
+func test_vector_numeric_controls_match_inspector_axis_style() -> void:
+	var axes := ["x", "y", "z"]
+	assert_int(_dock._object_position_controls.size()).is_equal(3)
+	for index in range(_dock._object_position_controls.size()):
+		var control: Range = _dock._object_position_controls[index]
+		assert_bool(control is Range).is_true()
+		assert_str(_get_axis_label(control)).is_equal(axes[index])
 
 
 func test_add_source_from_bar_appends_without_replacing_existing_models() -> void:
@@ -202,7 +235,7 @@ func test_add_source_from_bar_appends_without_replacing_existing_models() -> voi
 	assert_int(_dock._get_selected_source_index()).is_equal(1)
 	assert_str(_dock._source_path_edit.text).is_equal(second_path)
 	assert_object(_dock._loaded_source).is_not_null()
-	assert_str(_dock._status_label.text).is_equal("Selected 2 source model(s).")
+	assert_str(_dock._status_label.text).is_equal("Selected 2 source models.")
 
 
 func test_remove_selected_source_removes_one_model_and_previews_next() -> void:
@@ -227,7 +260,7 @@ func test_remove_selected_source_removes_one_model_and_previews_next() -> void:
 	assert_str(_dock._source_list.get_item_text(1)).is_equal("remove_third_model.tscn")
 	assert_int(_dock._get_selected_source_index()).is_equal(1)
 	assert_str(_dock._source_path_edit.text).is_equal(third_path)
-	assert_str(_dock._status_label.text).is_equal("Removed remove_second_model.tscn. Selected 2 source model(s).")
+	assert_str(_dock._status_label.text).is_equal("Removed \"remove_second_model.tscn\". Selected 2 source models.")
 
 
 func test_preview_export_overlay_tracks_export_aspect_ratio() -> void:
@@ -322,15 +355,15 @@ func test_projection_selection_syncs_camera_and_editable_controls() -> void:
 	_dock._on_projection_selected(1)
 
 	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_ORTHOGONAL)
-	assert_bool(_dock._camera_orthographic_size_spin.editable).is_true()
-	assert_bool(_dock._camera_fov_spin.editable).is_false()
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._camera_orthographic_size_spin)).is_false()
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._camera_fov_spin)).is_true()
 
 	_dock._camera_projection_option.select(0)
 	_dock._on_projection_selected(0)
 
 	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_PERSPECTIVE)
-	assert_bool(_dock._camera_orthographic_size_spin.editable).is_false()
-	assert_bool(_dock._camera_fov_spin.editable).is_true()
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._camera_orthographic_size_spin)).is_true()
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._camera_fov_spin)).is_false()
 
 
 func test_object_transform_controls_move_object_root_without_moving_camera() -> void:
@@ -465,11 +498,11 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 	var result: Dictionary = _dock._load_profile(profile_path)
 
 	assert_bool(result.ok).is_true()
-	assert_str(_dock._status_label.text).is_equal("Loaded profile loaded_profile.json")
+	assert_str(_dock._status_label.text).is_equal("Loaded profile \"loaded_profile.json\".")
 	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
 	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
 	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_ORTHOGONAL)
-	assert_bool(_dock._camera_orthographic_size_spin.editable).is_true()
+	assert_bool(ControlFactory.is_numeric_read_only(_dock._camera_orthographic_size_spin)).is_false()
 	assert_float(_dock._camera.fov).is_equal_approx(55.0, 0.001)
 	assert_float(_dock._camera.size).is_equal_approx(3.25, 0.001)
 	assert_bool(_dock._viewport.transparent_bg).is_false()
@@ -494,7 +527,7 @@ func test_load_profile_applies_controls_and_reuses_them_for_loaded_models() -> v
 
 	_dock._load_source(_save_test_scene("profiled_model.tscn"))
 
-	assert_str(_dock._status_label.text).is_equal("Loaded profiled_model.tscn")
+	assert_str(_dock._status_label.text).is_equal("Loaded \"profiled_model.tscn\".")
 	assert_vector(_dock._object_root.position).is_equal_approx(object_position, VECTOR_EPSILON)
 	assert_vector(_dock._object_root.rotation_degrees).is_equal_approx(object_rotation, VECTOR_EPSILON)
 	assert_int(_dock._camera.projection).is_equal(Camera3D.PROJECTION_ORTHOGONAL)
@@ -580,7 +613,7 @@ func test_export_validation_reports_missing_source_and_invalid_output_settings()
 	validation = _dock._validate_export_settings()
 
 	assert_bool(validation.ok).is_false()
-	assert_str(validation.message).contains("Export folder does not exist:")
+	assert_str(validation.message).contains("Export folder doesn't exist:")
 
 
 func test_output_folder_entry_accepts_directory_and_strips_legacy_file_names() -> void:
@@ -718,7 +751,7 @@ func test_dock_single_source_export_writes_sheet_and_repeated_individual_frames_
 	var source_output_path: String = validation.settings.output_path
 	var frame_paths := SpriteSheetExporter.get_individual_frame_paths(source_output_path, 2)
 	assert_bool(export_result.ok).is_true()
-	assert_str(export_result.message).contains("Exported 3 PNG file(s).")
+	assert_str(export_result.message).contains("Exported 3 PNG files.")
 	assert_str(source_output_path).ends_with("dock_export_model.png")
 	assert_bool(FileAccess.file_exists(source_output_path)).is_true()
 	assert_bool(FileAccess.file_exists(frame_paths[0])).is_true()
@@ -763,7 +796,7 @@ func _add_mesh_instance(parent: Node, size: Vector3, position: Vector3, is_visib
 	return mesh_instance
 
 
-func _set_vector3_spin_values(controls: Array[SpinBox], value: Vector3) -> void:
+func _set_vector3_spin_values(controls: Array[Range], value: Vector3) -> void:
 	controls[0].set_value_no_signal(value.x)
 	controls[1].set_value_no_signal(value.y)
 	controls[2].set_value_no_signal(value.z)
@@ -779,14 +812,14 @@ func _select_option_by_id(option_button: OptionButton, item_id: int) -> void:
 		option_button.select(0)
 
 
-func _find_collapsible_section(title: String, subsection := false) -> VBoxContainer:
+func _find_collapsible_section(title: String, subsection := false) -> FoldableContainer:
 	return _find_collapsible_section_in(_dock, title, subsection)
 
 
-func _find_collapsible_section_in(node: Node, title: String, subsection: bool) -> VBoxContainer:
-	if node is VBoxContainer and node.has_meta("collapsible_title"):
+func _find_collapsible_section_in(node: Node, title: String, subsection: bool) -> FoldableContainer:
+	if node is FoldableContainer and node.has_meta("collapsible_title"):
 		if str(node.get_meta("collapsible_title")) == title and bool(node.get_meta("collapsible_subsection")) == subsection:
-			return node as VBoxContainer
+			return node as FoldableContainer
 
 	for child in node.get_children():
 		var found := _find_collapsible_section_in(child, title, subsection)
@@ -796,16 +829,26 @@ func _find_collapsible_section_in(node: Node, title: String, subsection: bool) -
 	return null
 
 
-func _get_section_header(section: VBoxContainer) -> Button:
-	return section.get_child(0) as Button
+func _get_foldable_body(section: FoldableContainer) -> Control:
+	return section.get_child(0) as Control
 
 
-func _get_section_body(section: VBoxContainer) -> Control:
-	return section.get_child(1) as Control
+func _source_row_button(index: int) -> Button:
+	var add_bar: Node = _dock._source_path_edit.get_parent()
+	return add_bar.get_child(index) as Button
 
 
-func _preview_stack_is_visible() -> bool:
-	return _dock._preview_stack.visible
+func _get_axis_label(control: Range) -> String:
+	if control.has_method("get_label"):
+		return str(control.call("get_label"))
+
+	var parent := control.get_parent()
+	if parent is HBoxContainer and parent.get_child_count() > 0:
+		var label := parent.get_child(0) as Label
+		if label != null:
+			return label.text
+
+	return ""
 
 
 func _save_test_scene(file_name: String) -> String:

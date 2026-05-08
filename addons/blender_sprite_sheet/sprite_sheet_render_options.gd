@@ -12,46 +12,46 @@ const MAX_CAPTURE_DIMENSION := 16384
 
 static func get_msaa_options() -> Array[Dictionary]:
 	return [
-		{"label": "Off", "key": "off", "value": Viewport.MSAA_DISABLED},
-		{"label": "2x", "key": "2x", "value": Viewport.MSAA_2X},
-		{"label": "4x", "key": "4x", "value": Viewport.MSAA_4X},
-		{"label": "8x", "key": "8x", "value": Viewport.MSAA_8X},
+		{"label": "Disabled (Fastest)", "key": "off", "value": Viewport.MSAA_DISABLED},
+		{"label": "2x (Fast)", "key": "2x", "value": Viewport.MSAA_2X},
+		{"label": "4x (Average)", "key": "4x", "value": Viewport.MSAA_4X},
+		{"label": "8x (Slow)", "key": "8x", "value": Viewport.MSAA_8X},
 	]
 
 
 static func get_screen_space_aa_options() -> Array[Dictionary]:
 	return [
-		{"label": "Off", "key": "off", "value": Viewport.SCREEN_SPACE_AA_DISABLED},
-		{"label": "FXAA", "key": "fxaa", "value": Viewport.SCREEN_SPACE_AA_FXAA},
-		{"label": "SMAA", "key": "smaa", "value": Viewport.SCREEN_SPACE_AA_SMAA},
+		{"label": "Disabled (Fastest)", "key": "off", "value": Viewport.SCREEN_SPACE_AA_DISABLED},
+		{"label": "FXAA (Fast)", "key": "fxaa", "value": Viewport.SCREEN_SPACE_AA_FXAA},
+		{"label": "SMAA (Average)", "key": "smaa", "value": Viewport.SCREEN_SPACE_AA_SMAA},
 	]
 
 
 static func get_supersample_options() -> Array[Dictionary]:
 	return [
-		{"label": "1x", "key": "1x", "value": 1},
-		{"label": "2x", "key": "2x", "value": 2},
-		{"label": "4x", "key": "4x", "value": 4},
+		{"label": "1x (Fastest)", "key": "1x", "value": 1},
+		{"label": "2x (Slow)", "key": "2x", "value": 2},
+		{"label": "4x (Slowest)", "key": "4x", "value": 4},
 	]
 
 
 static func get_resize_filter_options() -> Array[Dictionary]:
 	return [
-		{"label": "Nearest", "key": "nearest", "value": Image.INTERPOLATE_NEAREST},
-		{"label": "Bilinear", "key": "bilinear", "value": Image.INTERPOLATE_BILINEAR},
-		{"label": "Cubic", "key": "cubic", "value": Image.INTERPOLATE_CUBIC},
-		{"label": "Trilinear", "key": "trilinear", "value": Image.INTERPOLATE_TRILINEAR},
-		{"label": "Lanczos", "key": "lanczos", "value": Image.INTERPOLATE_LANCZOS},
+		{"label": "Nearest (Fastest)", "key": "nearest", "value": Image.INTERPOLATE_NEAREST},
+		{"label": "Bilinear (Fast)", "key": "bilinear", "value": Image.INTERPOLATE_BILINEAR},
+		{"label": "Cubic (Average)", "key": "cubic", "value": Image.INTERPOLATE_CUBIC},
+		{"label": "Trilinear (Slow)", "key": "trilinear", "value": Image.INTERPOLATE_TRILINEAR},
+		{"label": "Lanczos (Slowest)", "key": "lanczos", "value": Image.INTERPOLATE_LANCZOS},
 	]
 
 
 static func get_anisotropic_filtering_options() -> Array[Dictionary]:
 	return [
-		{"label": "Off", "key": "off", "value": Viewport.ANISOTROPY_DISABLED},
-		{"label": "2x", "key": "2x", "value": Viewport.ANISOTROPY_2X},
-		{"label": "4x", "key": "4x", "value": Viewport.ANISOTROPY_4X},
-		{"label": "8x", "key": "8x", "value": Viewport.ANISOTROPY_8X},
-		{"label": "16x", "key": "16x", "value": Viewport.ANISOTROPY_16X},
+		{"label": "Disabled (Fastest)", "key": "off", "value": Viewport.ANISOTROPY_DISABLED},
+		{"label": "2x (Fast)", "key": "2x", "value": Viewport.ANISOTROPY_2X},
+		{"label": "4x (Average)", "key": "4x", "value": Viewport.ANISOTROPY_4X},
+		{"label": "8x (Slow)", "key": "8x", "value": Viewport.ANISOTROPY_8X},
+		{"label": "16x (Slower)", "key": "16x", "value": Viewport.ANISOTROPY_16X},
 	]
 
 

@@ -14,15 +14,15 @@ static func load_source(path: String) -> Dictionary:
 		return _failure(UNSUPPORTED_SOURCE_MESSAGE)
 
 	if not ResourceLoader.exists(source_path):
-		return _failure("Source asset does not exist: %s" % source_path)
+		return _failure("Source asset doesn't exist: \"%s\"." % source_path)
 
 	var resource := ResourceLoader.load(source_path)
 	if resource == null:
-		return _failure("Godot could not load the source asset: %s" % source_path)
+		return _failure("Godot couldn't load the source asset: \"%s\"." % source_path)
 
 	var instance := instantiate_resource(resource)
 	if instance == null:
-		return _failure("Source asset cannot be instantiated as 3D content: %s" % source_path)
+		return _failure("Source asset can't be instantiated as 3D content: \"%s\"." % source_path)
 
 	return {
 		"ok": true,

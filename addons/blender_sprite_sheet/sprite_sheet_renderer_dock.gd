@@ -55,16 +55,16 @@ var _camera: Camera3D
 var _world_environment: WorldEnvironment
 var _transparent_background_check: CheckBox
 var _background_color_picker: ColorPickerButton
-var _object_position_controls: Array[SpinBox] = []
-var _object_rotation_controls: Array[SpinBox] = []
-var _camera_fov_spin: SpinBox
+var _object_position_controls: Array[Range] = []
+var _object_rotation_controls: Array[Range] = []
+var _camera_fov_spin: Range
 var _camera_projection_option: OptionButton
-var _camera_orthographic_size_spin: SpinBox
-var _frame_width_spin: SpinBox
-var _frame_height_spin: SpinBox
-var _frame_count_spin: SpinBox
-var _columns_spin: SpinBox
-var _frame_spacing_spin: SpinBox
+var _camera_orthographic_size_spin: Range
+var _frame_width_spin: Range
+var _frame_height_spin: Range
+var _frame_count_spin: Range
+var _columns_spin: Range
+var _frame_spacing_spin: Range
 var _msaa_option: OptionButton
 var _screen_space_aa_option: OptionButton
 var _taa_check: CheckBox
@@ -107,10 +107,7 @@ func _build_ui() -> void:
 	content.add_theme_constant_override("separation", 8)
 	scroll.add_child(content)
 
-	var models_content := VBoxContainer.new()
-	models_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	models_content.add_theme_constant_override("separation", 8)
-	models_content.add_child(_create_source_controls())
+	var models_content := _create_source_controls() as VBoxContainer
 
 	_status_label = Label.new()
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -118,57 +115,30 @@ func _build_ui() -> void:
 	models_content.add_child(_status_label)
 	_add_collapsible_section(content, "Models", models_content)
 
-	_add_collapsible_section(content, "Preview", _create_preview_controls())
+	content.add_child(_create_preview_controls())
 
 	_add_collapsible_section(content, "Object", _create_object_controls())
 
-	_add_collapsible_section(content, "Profile", _create_profile_controls())
-
-	_add_collapsible_section(content, "Material", _create_material_controls())
-
-	_add_collapsible_section(content, "Background", _create_background_controls())
+	_add_collapsible_section(content, "Settings", _create_settings_controls())
 
 	_add_collapsible_section(content, "Export", _create_export_controls())
 
 	_create_file_dialogs()
 
 
-func _add_collapsible_section(parent: BoxContainer, title: String, body: Control, collapsed := false, subsection := false) -> VBoxContainer:
-	var section := VBoxContainer.new()
+func _add_collapsible_section(parent: BoxContainer, title: String, body: Control, collapsed := false, subsection := false) -> FoldableContainer:
+	var section := FoldableContainer.new()
+	section.title = title
+	section.folded = collapsed
 	section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	section.add_theme_constant_override("separation", 4 if subsection else 6)
 	section.set_meta("collapsible_title", title)
 	section.set_meta("collapsible_subsection", subsection)
 
-	var header := Button.new()
-	header.toggle_mode = true
-	header.button_pressed = not collapsed
-	header.flat = subsection
-	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.focus_mode = Control.FOCUS_NONE
-	header.add_theme_font_size_override("font_size", 14 if subsection else ControlFactory.SECTION_FONT_SIZE)
-	header.text = _get_collapsible_header_text(title, header.button_pressed, subsection)
-	header.toggled.connect(func(expanded: bool) -> void:
-		body.visible = expanded
-		header.text = _get_collapsible_header_text(title, expanded, subsection)
-	)
-	section.add_child(header)
-
-	body.visible = header.button_pressed
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	section.add_child(body)
 
 	parent.add_child(section)
 	return section
-
-
-func _get_collapsible_header_text(title: String, expanded: bool, subsection: bool) -> String:
-	var prefix := "v" if expanded else ">"
-	if subsection:
-		return "  %s %s" % [prefix, title]
-
-	return "%s %s" % [prefix, title]
 
 
 func _create_source_controls() -> Control:
@@ -193,7 +163,7 @@ func _create_source_controls() -> Control:
 	add_row.add_child(_source_path_edit)
 
 	var browse_button := Button.new()
-	browse_button.text = "Browse"
+	browse_button.text = "Browse..."
 	browse_button.tooltip_text = "Choose one or more models to add."
 	browse_button.pressed.connect(_on_browse_pressed)
 	add_row.add_child(browse_button)
@@ -246,7 +216,7 @@ func _create_profile_controls() -> Control:
 	path_row.add_child(_profile_path_edit)
 
 	var browse_button := Button.new()
-	browse_button.text = "Browse"
+	browse_button.text = "Browse..."
 	browse_button.pressed.connect(_on_profile_browse_pressed)
 	path_row.add_child(browse_button)
 	container.add_child(path_row)
@@ -302,7 +272,7 @@ func _create_resource_picker_row(label_text: String, placeholder: String, browse
 		_texture_path_edit = path_edit
 
 	var browse_button := Button.new()
-	browse_button.text = "Browse"
+	browse_button.text = "Browse..."
 	browse_button.pressed.connect(browse_callback)
 	row.add_child(browse_button)
 
@@ -352,7 +322,7 @@ func _create_object_controls() -> Control:
 	transform_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_object_position_controls = ControlFactory.create_vector3_row(transform_controls, "Position", DEFAULT_OBJECT_POSITION, -1000.0, 1000.0, 0.01, _on_object_control_changed)
 	_object_rotation_controls = ControlFactory.create_vector3_row(transform_controls, "Rotation", DEFAULT_OBJECT_ROTATION, -360.0, 360.0, 0.1, _on_object_control_changed)
-	_add_collapsible_section(container, "Transform", transform_controls, false, true)
+	_add_plain_group(container, "Transform", transform_controls)
 
 	var camera_controls := VBoxContainer.new()
 	camera_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -373,7 +343,7 @@ func _create_object_controls() -> Control:
 	_camera_orthographic_size_spin = ControlFactory.create_spin_box(0.001, 1000.0, 0.01, 4.0)
 	ControlFactory.add_labeled_control(camera_controls, "Ortho Size", _camera_orthographic_size_spin)
 	_camera_orthographic_size_spin.value_changed.connect(_on_camera_control_changed)
-	_add_collapsible_section(container, "Camera", camera_controls, false, true)
+	_add_plain_group(container, "Camera", camera_controls)
 
 	var action_controls := VBoxContainer.new()
 	action_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -386,9 +356,32 @@ func _create_object_controls() -> Control:
 	reset_button.text = "Reset Object"
 	reset_button.pressed.connect(_reset_object)
 	action_controls.add_child(reset_button)
-	_add_collapsible_section(container, "Actions", action_controls, true, true)
+	_add_plain_group(container, "Actions", action_controls)
 
 	return container
+
+
+func _create_settings_controls() -> Control:
+	var container := VBoxContainer.new()
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_add_plain_group(container, "Profile", _create_profile_controls())
+	_add_plain_group(container, "Material", _create_material_controls())
+	_add_plain_group(container, "Background", _create_background_controls())
+	return container
+
+
+func _add_plain_group(parent: BoxContainer, title: String, body: Control) -> void:
+	var group := VBoxContainer.new()
+	group.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	group.add_theme_constant_override("separation", 4)
+
+	var label := ControlFactory.create_section_label(title)
+	label.add_theme_font_size_override("font_size", 14)
+	group.add_child(label)
+
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	group.add_child(body)
+	parent.add_child(group)
 
 
 func _create_background_controls() -> Control:
@@ -470,13 +463,13 @@ func _create_export_controls() -> Control:
 
 	_output_path_edit = LineEdit.new()
 	_output_path_edit.placeholder_text = "res://exports"
-	_output_path_edit.tooltip_text = "Folder where generated PNG files will be written."
+	_output_path_edit.tooltip_text = "Choose where generated PNG files will be written."
 	_output_path_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_output_path_edit.text_submitted.connect(_on_output_path_submitted)
 	output_row.add_child(_output_path_edit)
 
 	var output_browse_button := Button.new()
-	output_browse_button.text = "Browse"
+	output_browse_button.text = "Browse..."
 	output_browse_button.pressed.connect(_on_output_browse_pressed)
 	output_row.add_child(output_browse_button)
 	output_controls.add_child(output_row)
@@ -484,7 +477,7 @@ func _create_export_controls() -> Control:
 	_name_pattern_edit = LineEdit.new()
 	_name_pattern_edit.text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
 	_name_pattern_edit.placeholder_text = Exporter.DEFAULT_OUTPUT_NAME_PATTERN
-	_name_pattern_edit.tooltip_text = "Tokens: {model}, {source}, {index}, {index0}, {count}, {output} (folder name)"
+	_name_pattern_edit.tooltip_text = "Use tokens: {model}, {source}, {index}, {index0}, {count},\n{output} (folder name)."
 	ControlFactory.add_labeled_control(output_controls, "Name Pattern", _name_pattern_edit)
 
 	_export_individual_frames_check = CheckBox.new()
@@ -721,7 +714,7 @@ func _preview_source(path: String) -> Dictionary:
 	var bounds := _calculate_model_bounds()
 	if not bounds.has_value:
 		_clear_loaded_source()
-		var message := "No visible mesh found in source asset: %s" % load_result.path
+		var message := "No visible mesh found in source asset: \"%s\"." % load_result.path
 		_set_status(message, true)
 		return {
 			"ok": false,
@@ -734,7 +727,7 @@ func _preview_source(path: String) -> Dictionary:
 	_frame_bounds(bounds.aabb)
 	if not _active_profile.is_empty():
 		_apply_profile_settings(_active_profile)
-	var message := "Loaded %s" % (load_result.path as String).get_file()
+	var message := "Loaded \"%s\"." % (load_result.path as String).get_file()
 	_source_path_edit.text = load_result.path
 	_set_status(message, false)
 	return {
@@ -769,7 +762,7 @@ func _set_source_paths(paths: PackedStringArray, preview_first := true) -> Dicti
 			return load_result
 
 	if _source_paths.size() > 1:
-		_set_status("Selected %d source model(s)." % _source_paths.size(), false)
+		_set_status("Selected %s." % _format_source_count(_source_paths.size()), false)
 
 	return load_result
 
@@ -822,7 +815,7 @@ func _add_source_paths(paths: PackedStringArray) -> Dictionary:
 		return load_result
 
 	if _source_paths.size() > 1:
-		_set_status("Selected %d source model(s)." % _source_paths.size(), false)
+		_set_status("Selected %s." % _format_source_count(_source_paths.size()), false)
 
 	return load_result
 
@@ -841,7 +834,7 @@ func _remove_selected_source() -> void:
 
 	if remaining_paths.is_empty():
 		_set_source_paths(remaining_paths, false)
-		_set_status("Removed %s. Add a model to preview." % removed_path.get_file(), false)
+		_set_status("Removed \"%s\". Add a model to preview." % removed_path.get_file(), false)
 		return
 
 	_source_paths = remaining_paths
@@ -849,7 +842,7 @@ func _remove_selected_source() -> void:
 	_update_source_list(next_index)
 	var load_result := _preview_source(_source_paths[next_index])
 	if load_result.ok:
-		_set_status("Removed %s. Selected %d source model(s)." % [removed_path.get_file(), _source_paths.size()], false)
+		_set_status("Removed \"%s\". Selected %s." % [removed_path.get_file(), _format_source_count(_source_paths.size())], false)
 
 
 func _update_source_list(selected_index := -1) -> void:
@@ -1116,7 +1109,7 @@ func _frame_bounds(bounds: AABB) -> void:
 	)
 
 
-func _set_vector3_controls(controls: Array[SpinBox], value: Vector3) -> void:
+func _set_vector3_controls(controls: Array[Range], value: Vector3) -> void:
 	CameraController.set_vector3_controls(controls, value)
 
 
@@ -1302,16 +1295,16 @@ func _export_sprite_sheets() -> void:
 		var settings: Dictionary = export_items[index]
 		var source_path := str(settings["source_path"])
 		var source_name := source_path.get_file()
-		_set_export_result("Rendering %d/%d: %s" % [index + 1, export_items.size(), source_name], false)
+		_set_export_result("Rendering %d of %d: \"%s\"." % [index + 1, export_items.size(), source_name], false)
 
 		var load_result := _load_source_for_export(source_path, export_scene_settings)
 		if not load_result.ok:
-			_finish_export("Export failed for %s: %s" % [source_name, load_result.message], true)
+			_finish_export("Export failed for \"%s\": %s" % [source_name, load_result.message], true)
 			return
 
 		var loaded_validation := _validate_export_settings_for(settings, is_instance_valid(_loaded_source))
 		if not loaded_validation.ok:
-			_finish_export("Export failed for %s: %s" % [source_name, loaded_validation.message], true)
+			_finish_export("Export failed for \"%s\": %s" % [source_name, loaded_validation.message], true)
 			return
 
 		settings = loaded_validation.settings
@@ -1322,18 +1315,22 @@ func _export_sprite_sheets() -> void:
 		var frame_size := Vector2i(int(settings["frame_width"]), int(settings["frame_height"]))
 		var capture_result: Dictionary = await Capture.capture_scene(_scene_root, frame_size, bool(settings["transparent_background"]), settings)
 		if not capture_result.ok:
-			_finish_export("Export failed for %s: %s" % [source_name, capture_result.message], true)
+			_finish_export("Export failed for \"%s\": %s" % [source_name, capture_result.message], true)
 			return
 
 		var export_result := _write_static_export(capture_result.image, settings)
 		if not export_result.ok:
-			_finish_export("Export failed for %s: %s" % [source_name, export_result.message], true)
+			_finish_export("Export failed for \"%s\": %s" % [source_name, export_result.message], true)
 			return
 
 		var exported_paths: PackedStringArray = export_result.paths
 		exported_file_count += exported_paths.size()
 
-	_finish_export("Exported %d source model(s) to %s (%d PNG file(s))." % [export_items.size(), output_dir, exported_file_count], false)
+	_finish_export("Exported %s to \"%s\" (%s)." % [
+		_format_source_count(export_items.size()),
+		output_dir,
+		_format_png_count(exported_file_count),
+	], false)
 
 
 func _load_source_for_export(source_path: String, export_scene_settings: Dictionary) -> Dictionary:
@@ -1391,4 +1388,22 @@ func _profile_failure(message: String, is_error: bool) -> Dictionary:
 
 func _set_status(message: String, is_error: bool) -> void:
 	_status_label.text = message
-	_status_label.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3) if is_error else Color(0.7, 0.9, 0.7))
+	if is_error:
+		_status_label.add_theme_color_override("font_color", _get_editor_theme_color("error_color", Color(1.0, 0.35, 0.3)))
+	else:
+		_status_label.remove_theme_color_override("font_color")
+
+
+func _get_editor_theme_color(color_name: String, fallback: Color) -> Color:
+	if has_theme_color(color_name, "Editor"):
+		return get_theme_color(color_name, "Editor")
+
+	return fallback
+
+
+func _format_source_count(count: int) -> String:
+	return "%d source %s" % [count, "model" if count == 1 else "models"]
+
+
+func _format_png_count(count: int) -> String:
+	return "%d PNG %s" % [count, "file" if count == 1 else "files"]
