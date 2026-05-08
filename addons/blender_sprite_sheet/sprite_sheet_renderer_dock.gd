@@ -15,6 +15,7 @@ const SourceSelection := preload("res://addons/blender_sprite_sheet/sprite_sheet
 const ExportPlan := preload("res://addons/blender_sprite_sheet/sprite_sheet_export_plan.gd")
 const ControlFactory := preload("res://addons/blender_sprite_sheet/sprite_sheet_control_factory.gd")
 const RenderOptions := preload("res://addons/blender_sprite_sheet/sprite_sheet_render_options.gd")
+const InspectorSettings := preload("res://addons/blender_sprite_sheet/sprite_sheet_inspector_settings.gd")
 
 const SUPPORTED_EXTENSIONS := SourceLoader.SUPPORTED_EXTENSIONS
 const DEFAULT_CAMERA_POSITION := Vector3(0.0, 1.5, 4.0)
@@ -75,6 +76,9 @@ var _output_path_edit: LineEdit
 var _export_individual_frames_check: CheckBox
 var _export_button: Button
 var _export_result_label: Label
+var _properties_inspector: EditorInspector
+var _inspector_settings: Resource
+var _hidden_properties_controls: Control
 var _loaded_source: Node
 var _active_profile: Dictionary = {}
 var _source_paths := PackedStringArray()
@@ -90,6 +94,7 @@ func _ready() -> void:
 	_sync_camera_from_controls()
 	_update_background()
 	_update_export_frame_overlay()
+	_sync_inspector_settings_from_controls()
 
 
 func _exit_tree() -> void:
@@ -118,17 +123,20 @@ func _build_ui() -> void:
 	content.add_child(ControlFactory.create_section_label("Preview"))
 	content.add_child(_create_preview_controls())
 
-	content.add_child(ControlFactory.create_section_label("Object"))
-	content.add_child(_create_object_controls())
+	_hidden_properties_controls = VBoxContainer.new()
+	_hidden_properties_controls.visible = false
+	_hidden_properties_controls.add_child(_create_object_controls())
+	_hidden_properties_controls.add_child(_create_background_controls())
+	add_child(_hidden_properties_controls)
+
+	content.add_child(ControlFactory.create_section_label("Properties"))
+	content.add_child(_create_properties_controls())
 
 	content.add_child(ControlFactory.create_section_label("Profile"))
 	content.add_child(_create_profile_controls())
 
 	content.add_child(ControlFactory.create_section_label("Material"))
 	content.add_child(_create_material_controls())
-
-	content.add_child(ControlFactory.create_section_label("Background"))
-	content.add_child(_create_background_controls())
 
 	content.add_child(ControlFactory.create_section_label("Export"))
 	content.add_child(_create_export_controls())
@@ -361,6 +369,30 @@ func _create_background_controls() -> Control:
 	_background_color_picker.color = Color(0.12, 0.12, 0.12)
 	_background_color_picker.color_changed.connect(_on_background_color_changed)
 	ControlFactory.add_labeled_control(container, "Color", _background_color_picker)
+
+	return container
+
+
+func _create_properties_controls() -> Control:
+	var container := VBoxContainer.new()
+	container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	_inspector_settings = InspectorSettings.new()
+	_properties_inspector = EditorInspector.new()
+	_properties_inspector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_properties_inspector.property_edited.connect(_on_properties_inspector_edited)
+	container.add_child(_properties_inspector)
+	_refresh_properties_inspector()
+
+	var frame_button := Button.new()
+	frame_button.text = "Frame Model"
+	frame_button.pressed.connect(_frame_model)
+	container.add_child(frame_button)
+
+	var reset_button := Button.new()
+	reset_button.text = "Reset Object"
+	reset_button.pressed.connect(_reset_object)
+	container.add_child(reset_button)
 
 	return container
 
@@ -1036,6 +1068,7 @@ func _apply_profile_settings(profile: Dictionary) -> void:
 	_update_background()
 	_update_render_options()
 	_update_export_frame_overlay()
+	_sync_inspector_settings_from_controls()
 	_apply_material_settings(false)
 
 
@@ -1046,6 +1079,7 @@ func _reset_object_transform() -> void:
 	_set_vector3_controls(_object_position_controls, DEFAULT_OBJECT_POSITION)
 	_set_vector3_controls(_object_rotation_controls, DEFAULT_OBJECT_ROTATION)
 	_sync_object_from_controls()
+	_sync_inspector_settings_from_controls()
 
 
 func _frame_bounds(bounds: AABB) -> void:
@@ -1059,22 +1093,72 @@ func _frame_bounds(bounds: AABB) -> void:
 		DEFAULT_CAMERA_POSITION,
 		DEFAULT_CAMERA_ROTATION
 	)
+	_sync_inspector_settings_from_controls()
 
 
 func _set_vector3_controls(controls: Array[SpinBox], value: Vector3) -> void:
 	CameraController.set_vector3_controls(controls, value)
 
 
+func _sync_inspector_settings_from_controls() -> void:
+	if _inspector_settings == null:
+		return
+
+	_inspector_settings.sync_from_controls(
+		_object_position_controls,
+		_object_rotation_controls,
+		_camera_projection_option,
+		_camera_fov_spin,
+		_camera_orthographic_size_spin,
+		_transparent_background_check,
+		_background_color_picker
+	)
+	_refresh_properties_inspector()
+
+
+func _apply_inspector_settings_to_controls() -> void:
+	if _inspector_settings == null:
+		return
+
+	_inspector_settings.apply_to_controls(
+		_object_position_controls,
+		_object_rotation_controls,
+		_camera_projection_option,
+		_camera_fov_spin,
+		_camera_orthographic_size_spin,
+		_transparent_background_check,
+		_background_color_picker
+	)
+	_sync_object_from_controls()
+	_sync_camera_from_controls()
+	_update_background()
+
+
+func _refresh_properties_inspector() -> void:
+	if _properties_inspector == null or _inspector_settings == null:
+		return
+
+	_properties_inspector.edit(null)
+	_properties_inspector.edit(_inspector_settings)
+
+
+func _on_properties_inspector_edited(_property: String) -> void:
+	_apply_inspector_settings_to_controls()
+
+
 func _on_object_control_changed(_value: float) -> void:
 	_sync_object_from_controls()
+	_sync_inspector_settings_from_controls()
 
 
 func _on_camera_control_changed(_value: float) -> void:
 	_sync_camera_from_controls()
+	_sync_inspector_settings_from_controls()
 
 
 func _on_projection_selected(_index: int) -> void:
 	_sync_camera_from_controls()
+	_sync_inspector_settings_from_controls()
 
 
 func _sync_camera_from_controls() -> void:
@@ -1098,10 +1182,12 @@ func _sync_object_from_controls() -> void:
 
 func _on_transparent_background_toggled(_button_pressed: bool) -> void:
 	_update_background()
+	_sync_inspector_settings_from_controls()
 
 
 func _on_background_color_changed(_color: Color) -> void:
 	_update_background()
+	_sync_inspector_settings_from_controls()
 
 
 func _on_export_dimensions_changed(_value: float) -> void:
