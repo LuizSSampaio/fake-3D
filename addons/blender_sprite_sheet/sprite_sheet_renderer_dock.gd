@@ -77,8 +77,8 @@ var _export_individual_frames_check: CheckBox
 var _export_button: Button
 var _export_result_label: Label
 var _properties_inspector: EditorInspector
-var _inspector_settings: Resource
-var _hidden_properties_controls: Control
+var _inspector_settings: InspectorSettings
+var _hidden_legacy_controls: Control
 var _loaded_source: Node
 var _active_profile: Dictionary = {}
 var _source_paths := PackedStringArray()
@@ -123,11 +123,11 @@ func _build_ui() -> void:
 	content.add_child(ControlFactory.create_section_label("Preview"))
 	content.add_child(_create_preview_controls())
 
-	_hidden_properties_controls = VBoxContainer.new()
-	_hidden_properties_controls.visible = false
-	_hidden_properties_controls.add_child(_create_object_controls())
-	_hidden_properties_controls.add_child(_create_background_controls())
-	add_child(_hidden_properties_controls)
+	_hidden_legacy_controls = VBoxContainer.new()
+	_hidden_legacy_controls.visible = false
+	_hidden_legacy_controls.add_child(_create_object_controls())
+	_hidden_legacy_controls.add_child(_create_background_controls())
+	add_child(_hidden_legacy_controls)
 
 	content.add_child(ControlFactory.create_section_label("Properties"))
 	content.add_child(_create_properties_controls())
